@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCR Gel Genie - Web Gel Labeler</title>
+    <!-- Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style System -->
+    <link rel="stylesheet" href="style.css">
+    <!-- PptxGenJS CDN for Client-Side Widescreen PowerPoint Export -->
+    <script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Top Toolbar -->
+        <header class="app-header">
+            <div class="logo-area">
+                <img src="logo.png" alt="Logo" class="app-logo" onerror="this.style.display='none'">
+                <h1>PCR Gel Genie <span class="badge">Web</span></h1>
+            </div>
+            
+            <!-- Tab switches -->
+            <div class="tab-bar-container">
+                <div class="tab-bar" id="tab-bar">
+                    <!-- Tabs will be dynamically created here -->
+                </div>
+                <button id="add-tab-btn" class="icon-btn" title="Add New Gel Tab">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+
+            <!-- Global Action Controls -->
+            <div class="global-actions">
+                <button id="undo-btn" class="action-btn header-btn" title="Undo (Ctrl+Z)" disabled>
+                    <i class="fa-solid fa-rotate-left"></i> Undo
+                </button>
+                <button id="redo-btn" class="action-btn header-btn" title="Redo (Ctrl+Y)" disabled>
+                    <i class="fa-solid fa-rotate-right"></i> Redo
+                </button>
+                <button id="export-img-btn" class="action-btn primary-btn" title="Download annotated gel image">
+                    <i class="fa-solid fa-file-image"></i> Export PNG
+                </button>
+                <button id="export-pptx-btn" class="action-btn success-btn" title="Export to PowerPoint widescreen slides">
+                    <i class="fa-solid fa-file-powerpoint"></i> Export PPTX
+                </button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Sidebar Panel: Controls & Options -->
+            <aside class="control-panel">
+                <!-- 1. Click Mode Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-computer-mouse"></i> Click Interaction</h2>
+                    <div class="section-content">
+                        <label for="click-mode-select">Placement Mode:</label>
+                        <select id="click-mode-select">
+                            <option value="disabled">🚫 Disabled (Selection / Pan)</option>
+                            <option value="auto-number">🔢 Auto-Numbering (e.g. 1, 2, 3)</option>
+                            <option value="custom">✍️ Custom Text</option>
+                        </select>
+                        
+                        <div id="custom-text-input-wrap" class="hidden-field">
+                            <label for="custom-text-input">Next Label Text:</label>
+                            <div class="input-with-button">
+                                <input type="text" id="custom-text-input" value="L1" placeholder="e.g. L1, Ladder, P1">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. Font Properties Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-font"></i> Batch / Active Label Font</h2>
+                    <div class="section-content">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="font-family-select">Font Family:</label>
+                                <select id="font-family-select">
+                                    <option value="Arial">Arial</option>
+                                    <option value="'Courier New'">Courier New</option>
+                                    <option value="'Times New Roman'">Times New Roman</option>
+                                    <option value="'Outfit'">Outfit</option>
+                                    <option value="monospace">Monospace</option>
+                                </select>
+                            </div>
+                            <div class="form-group size-group">
+                                <label for="font-size-input">Size (px):</label>
+                                <input type="number" id="font-size-input" min="6" max="72" value="12">
+                            </div>
+                        </div>
+                        
+                        <!-- Color swatches -->
+                        <div class="form-group">
+                            <label>Label Color:</label>
+                            <div class="color-swatches" id="color-swatches">
+                                <div class="swatch active" data-color="#00FF00" style="background-color: #00FF00;" title="Neon Green"></div>
+                                <div class="swatch" data-color="#FF0000" style="background-color: #FF0000;" title="Red"></div>
+                                <div class="swatch" data-color="#00FFFF" style="background-color: #00FFFF;" title="Electric Cyan"></div>
+                                <div class="swatch" data-color="#FFFF00" style="background-color: #FFFF00;" title="Yellow"></div>
+                                <div class="swatch" data-color="#FFFFFF" style="background-color: #FFFFFF;" title="White"></div>
+                                <div class="swatch" data-color="#000000" style="background-color: #000000; border: 1px solid #555;" title="Black"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. Alignment Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-align-center"></i> PowerPoint Align & Distribute</h2>
+                    <div class="section-content grid-buttons">
+                        <button id="align-left-btn" class="tool-btn" title="Align selected labels to leftmost edge">
+                            <i class="fa-solid fa-align-left"></i> Left
+                        </button>
+                        <button id="align-top-btn" class="tool-btn" title="Align selected labels to topmost edge">
+                            <i class="fa-solid fa-align-justify fa-rotate-90"></i> Top
+                        </button>
+                        <button id="dist-horiz-btn" class="tool-btn" title="Distribute selected labels horizontally">
+                            <i class="fa-solid fa-arrows-left-right"></i> Dist. Horiz
+                        </button>
+                        <button id="dist-vert-btn" class="tool-btn" title="Distribute selected labels vertically">
+                            <i class="fa-solid fa-arrows-up-down"></i> Dist. Vert
+                        </button>
+                    </div>
+                </section>
+
+                <!-- 4. Modeless Visual Grid Overlay Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-border-all"></i> Visual Grid Overlay Reference</h2>
+                    <div class="section-content">
+                        <div class="toggle-row">
+                            <input type="checkbox" id="grid-enable-check">
+                            <label for="grid-enable-check" class="check-label">Show Reference Grid</label>
+                        </div>
+
+                        <div id="grid-controls-container" class="grid-controls-wrap">
+                            <div class="form-group">
+                                <label for="grid-color-select">Grid Line Color:</label>
+                                <select id="grid-color-select">
+                                    <option value="#E29C3D">🍊 Blender Orange</option>
+                                    <option value="#00FF00">🟢 Neon Green</option>
+                                    <option value="#FF0000">🔴 Bright Red</option>
+                                    <option value="#00FFFF">🔵 Electric Cyan</option>
+                                    <option value="#FFFFFF">⚪ Pure White</option>
+                                    <option value="#555555">⚫ Muted Gray</option>
+                                </select>
+                            </div>
+
+                            <div class="slider-row">
+                                <div class="slider-header">
+                                    <label for="grid-x-spacing">H Spacing (X px):</label>
+                                    <span id="grid-x-spacing-val">40</span>
+                                </div>
+                                <input type="range" id="grid-x-spacing" min="5" max="500" value="40">
+                            </div>
+
+                            <div class="slider-row">
+                                <div class="slider-header">
+                                    <label for="grid-y-spacing">V Spacing (Y px):</label>
+                                    <span id="grid-y-spacing-val">40</span>
+                                </div>
+                                <input type="range" id="grid-y-spacing" min="5" max="500" value="40">
+                            </div>
+
+                            <div class="slider-row">
+                                <div class="slider-header">
+                                    <label for="grid-x-offset">X Offset (px):</label>
+                                    <span id="grid-x-offset-val">0</span>
+                                </div>
+                                <input type="range" id="grid-x-offset" min="-500" max="500" value="0">
+                            </div>
+
+                            <div class="slider-row">
+                                <div class="slider-header">
+                                    <label for="grid-y-offset">Y Offset (px):</label>
+                                    <span id="grid-y-offset-val">0</span>
+                                </div>
+                                <input type="range" id="grid-y-offset" min="-500" max="500" value="0">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 5. Slide Customization -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-sliders"></i> Slide Presentation Settings</h2>
+                    <div class="section-content">
+                        <div class="form-group">
+                            <label for="slide-title-input">Slide Title:</label>
+                            <input type="text" id="slide-title-input" placeholder="e.g. Agarose Gel Electrophoresis Analysis">
+                        </div>
+                        <button id="clear-labels-btn" class="tool-btn danger-btn w-100 mt-2">
+                            <i class="fa-solid fa-trash-can"></i> Clear All Labels
+                        </button>
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Main Interactive Canvas Viewport -->
+            <main class="canvas-viewport" id="canvas-viewport">
+                <!-- Empty State Upload Area -->
+                <div class="upload-dropzone" id="upload-dropzone">
+                    <div class="dropzone-content">
+                        <i class="fa-solid fa-cloud-arrow-up cloud-icon"></i>
+                        <h3>Drag & Drop Gel Image Here</h3>
+                        <p>Supports PNG, JPG, JPEG, TIFF, BMP</p>
+                        <span class="or-separator">or</span>
+                        <label for="file-upload-input" class="action-btn primary-btn select-file-label">
+                            Browse Local Files
+                        </label>
+                        <input type="file" id="file-upload-input" accept="image/*" class="hidden-file-input">
+                    </div>
+                </div>
+
+                <!-- Canvas Area -->
+                <div class="canvas-container hidden" id="canvas-container">
+                    <div class="canvas-wrapper" id="canvas-wrapper">
+                        <!-- Gel Image -->
+                        <img id="gel-image-display" src="" alt="Gel Electrophoresis">
+                        
+                        <!-- SVG grid reference lines overlay -->
+                        <svg class="grid-overlay-svg" id="grid-overlay-svg"></svg>
+                        
+                        <!-- Label placement area -->
+                        <div class="labels-layer" id="labels-layer"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Custom Edit Label Dialog Modal (Modeless simulation inline overlay) -->
+        <div class="modal-overlay hidden" id="edit-label-modal">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Edit Label Properties</h3>
+                    <button class="modal-close-btn" id="modal-close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="edit-label-text">Label Text:</label>
+                        <input type="text" id="edit-label-text" value="">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-label-font">Font Family:</label>
+                            <select id="edit-label-font">
+                                <option value="Arial">Arial</option>
+                                <option value="'Courier New'">Courier New</option>
+                                <option value="'Times New Roman'">Times New Roman</option>
+                                <option value="'Outfit'">Outfit</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-label-size">Font Size (px):</label>
+                            <input type="number" id="edit-label-size" min="6" max="72">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-label-color">Text Color:</label>
+                            <input type="color" id="edit-label-color">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-label-rotation">Rotation (deg):</label>
+                            <select id="edit-label-rotation">
+                                <option value="0">0° (Horizontal)</option>
+                                <option value="270">270° (Vertical - Ladder)</option>
+                                <option value="90">90° (Vertical Downwards)</option>
+                                <option value="45">45° (Angled)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="action-btn danger-btn" id="edit-label-delete-btn"><i class="fa-solid fa-trash"></i> Delete Label</button>
+                    <div class="right-buttons">
+                        <button class="action-btn header-btn" id="edit-label-cancel-btn">Cancel</button>
+                        <button class="action-btn primary-btn" id="edit-label-save-btn">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer / Status Readout -->
+        <footer class="app-status">
+            <div id="status-message">Ready. Please upload a gel electrophoresis image to get started.</div>
+            <div class="status-indicators">
+                <span id="coord-display"><i class="fa-solid fa-crosshairs"></i> X: - , Y: -</span>
+                <span id="selection-count"><i class="fa-solid fa-object-group"></i> 0 selected</span>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
