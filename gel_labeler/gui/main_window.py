@@ -1808,7 +1808,7 @@ class MainWindow(QMainWindow):
             "  <li>JSON Database and CSV Spreadsheet export</li>"
             "  <li>High-resolution pixel-perfect image export</li>"
             "</ul>"
-            "<p>Author: Antigravity AI</p>"
+            "<p>Author: Devanandan K C</p>"
         )
 
     # --- State Sync & Updates ---
