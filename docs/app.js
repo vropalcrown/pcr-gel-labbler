@@ -71,7 +71,15 @@
         canvasViewport: document.getElementById("canvas-viewport"),
         statusMessage: document.getElementById("status-message"),
         coordDisplay: document.getElementById("coord-display"),
-        selectionCount: document.getElementById("selection-count"),
+        // Suite Navigation
+        navGelBtn: document.getElementById("nav-gel-btn"),
+        navColonyBtn: document.getElementById("nav-colony-btn"),
+        gelModule: document.getElementById("gel-module"),
+        colonyModule: document.getElementById("colony-module"),
+        gelTabBarContainer: document.getElementById("gel-tab-bar-container"),
+        gelGlobalActions: document.getElementById("gel-global-actions"),
+        colonyGlobalActions: document.getElementById("colony-global-actions"),
+        
         // Modal elements
         editLabelModal: document.getElementById("edit-label-modal"),
         editLabelText: document.getElementById("edit-label-text"),
@@ -82,7 +90,36 @@
         editLabelDeleteBtn: document.getElementById("edit-label-delete-btn"),
         editLabelCancelBtn: document.getElementById("edit-label-cancel-btn"),
         editLabelSaveBtn: document.getElementById("edit-label-save-btn"),
-        modalCloseBtn: document.getElementById("modal-close-btn")
+        modalCloseBtn: document.getElementById("modal-close-btn"),
+
+        // Colony Counter Module Elements
+        colonyFileInput: document.getElementById("colony-file-input"),
+        colonyFileInputBtn: document.getElementById("colony-file-input-btn"),
+        colonyDropzone: document.getElementById("colony-dropzone"),
+        colonyCanvasContainer: document.getElementById("colony-canvas-container"),
+        colonyCanvasWrapper: document.getElementById("colony-canvas-wrapper"),
+        colonyImageDisplay: document.getElementById("colony-image-display"),
+        colonyDishSvg: document.getElementById("colony-dish-svg"),
+        colonyMarkersLayer: document.getElementById("colony-markers-layer"),
+        colonyViewport: document.getElementById("colony-viewport"),
+        colonySensSlider: document.getElementById("colony-sens-slider"),
+        colonySensVal: document.getElementById("colony-sens-val"),
+        colonyMinRad: document.getElementById("colony-min-rad"),
+        colonyMaxRad: document.getElementById("colony-max-rad"),
+        colonyCircSlider: document.getElementById("colony-circ-slider"),
+        colonyCircVal: document.getElementById("colony-circ-val"),
+        colonyMaskDish: document.getElementById("colony-mask-dish"),
+        colonyInvertMode: document.getElementById("colony-invert-mode"),
+        colonyColorSelect: document.getElementById("colony-color-select"),
+        colonyMarkerSize: document.getElementById("colony-marker-size"),
+        colonyShowNumbers: document.getElementById("colony-show-numbers"),
+        colonyVolumeInput: document.getElementById("colony-volume-input"),
+        colonyDilutionSelect: document.getElementById("colony-dilution-select"),
+        colonyStatCount: document.getElementById("colony-stat-count"),
+        colonyStatCfu: document.getElementById("colony-stat-cfu"),
+        colonyImgInfo: document.getElementById("colony-img-info"),
+        colonyExportImgBtn: document.getElementById("colony-export-img-btn"),
+        colonyExportCsvBtn: document.getElementById("colony-export-csv-btn")
     };
 
     // --- Helper functions ---
@@ -1431,6 +1468,494 @@
         }
     });
 
+    // =========================================================================
+    // ================== SUPER LAB SUITE MODULE NAVIGATION =====================
+    // =========================================================================
+
+    let currentModule = "gel"; // "gel" or "colony"
+
+    function switchSuiteModule(moduleName) {
+        currentModule = moduleName;
+        if (moduleName === "gel") {
+            elements.navGelBtn.classList.add("active");
+            elements.navColonyBtn.classList.remove("active");
+            elements.gelModule.classList.remove("hidden");
+            elements.colonyModule.classList.add("hidden");
+            elements.gelTabBarContainer.classList.remove("hidden");
+            elements.gelGlobalActions.classList.remove("hidden");
+            elements.colonyGlobalActions.classList.add("hidden");
+            showStatus("Active module: PCR Gel Genie");
+        } else if (moduleName === "colony") {
+            elements.navColonyBtn.classList.add("active");
+            elements.navGelBtn.classList.remove("active");
+            elements.colonyModule.classList.remove("hidden");
+            elements.gelModule.classList.add("hidden");
+            elements.gelTabBarContainer.classList.add("hidden");
+            elements.gelGlobalActions.classList.add("hidden");
+            elements.colonyGlobalActions.classList.remove("hidden");
+            showStatus("Active module: Colony & Seed AI Counter");
+        }
+    }
+
+    elements.navGelBtn.addEventListener("click", () => switchSuiteModule("gel"));
+    elements.navColonyBtn.addEventListener("click", () => switchSuiteModule("colony"));
+
+    // =========================================================================
+    // ================== COLONY & SEED AI VISION COUNTER ======================
+    // =========================================================================
+
+    let colonyState = {
+        imageSrc: null,
+        imageWidth: 0,
+        imageHeight: 0,
+        fileName: "",
+        colonies: [],
+        dishCircle: null,
+        rawCanvas: null
+    };
+
+    function handleColonyImageFile(file) {
+        if (!file || !file.type.match("image.*")) {
+            showStatus("Error: Please select a valid image file.");
+            return;
+        }
+
+        const reader = new FileReader();
+        showStatus("Loading plate image...");
+
+        reader.onload = function(e) {
+            const dataUrl = e.target.result;
+            const img = new Image();
+            img.onload = function() {
+                colonyState.imageSrc = dataUrl;
+                colonyState.imageWidth = img.width;
+                colonyState.imageHeight = img.height;
+                colonyState.fileName = file.name;
+                colonyState.colonies = [];
+
+                // Create offscreen analysis canvas
+                const offCanvas = document.createElement("canvas");
+                offCanvas.width = img.width;
+                offCanvas.height = img.height;
+                const ctx = offCanvas.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+                colonyState.rawCanvas = offCanvas;
+
+                // Update UI Display
+                elements.colonyDropzone.classList.add("hidden");
+                elements.colonyCanvasContainer.classList.remove("hidden");
+                elements.colonyImageDisplay.src = dataUrl;
+                elements.colonyCanvasWrapper.style.width = img.width + "px";
+                elements.colonyCanvasWrapper.style.height = img.height + "px";
+                elements.colonyDishSvg.setAttribute("viewBox", `0 0 ${img.width} ${img.height}`);
+                elements.colonyImgInfo.textContent = `${file.name} (${img.width}x${img.height} px)`;
+
+                runColonyAiDetection();
+                showStatus(`Plate loaded: ${file.name}`);
+            };
+            img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // Computer vision detection algorithm
+    function runColonyAiDetection() {
+        if (!colonyState.rawCanvas) return;
+
+        const w = colonyState.imageWidth;
+        const h = colonyState.imageHeight;
+        const ctx = colonyState.rawCanvas.getContext("2d");
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+
+        const sens = parseInt(elements.colonySensSlider.value, 10);
+        const minRad = parseInt(elements.colonyMinRad.value, 10);
+        const maxRad = parseInt(elements.colonyMaxRad.value, 10);
+        const circMin = parseInt(elements.colonyCircSlider.value, 10) / 100.0;
+        const maskDish = elements.colonyMaskDish.checked;
+        const invert = elements.colonyInvertMode.checked;
+
+        // 1. Petri dish circular boundary
+        const cx = Math.floor(w / 2);
+        const cy = Math.floor(h / 2);
+        const dishR = Math.floor(Math.min(w, h) * 0.46);
+        colonyState.dishCircle = maskDish ? { cx, cy, r: dishR } : null;
+
+        // Render dish boundary SVG
+        if (colonyState.dishCircle) {
+            elements.colonyDishSvg.innerHTML = `<circle cx="${cx}" cy="${cy}" r="${dishR}" stroke="#00FFCC" stroke-width="2" stroke-dasharray="6,4" fill="none" />`;
+        } else {
+            elements.colonyDishSvg.innerHTML = "";
+        }
+
+        // 2. Grayscale & Adaptive Local Thresholding
+        const gray = new Uint8Array(w * h);
+        let sum = 0;
+        for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+            const g = Math.round(data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+            gray[j] = g;
+            sum += g;
+        }
+        const meanIntensity = sum / (w * h);
+
+        // Compute local variance and threshold
+        const binary = new Uint8Array(w * h);
+        const thresholdOffset = (50 - sens) * 0.4;
+        const baseThreshold = meanIntensity + (invert ? thresholdOffset : -thresholdOffset);
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const idx = y * w + x;
+                // Check if inside dish circle mask
+                if (maskDish) {
+                    const distFromCenter = Math.hypot(x - cx, y - cy);
+                    if (distFromCenter > dishR * 0.96) {
+                        binary[idx] = 0;
+                        continue;
+                    }
+                }
+                const g = gray[idx];
+                const isForeground = invert ? (g > baseThreshold) : (g < baseThreshold);
+                binary[idx] = isForeground ? 1 : 0;
+            }
+        }
+
+        // 3. Connected Component Flood-Fill & Centroid Extraction
+        const visited = new Uint8Array(w * h);
+        const detectedColonies = [];
+        let nextId = 1;
+
+        const minArea = Math.PI * (minRad * minRad) * 0.5;
+        const maxArea = Math.PI * (maxRad * maxRad) * 1.6;
+
+        // Grid-based sampling for high-speed scanning
+        const step = Math.max(1, Math.floor(minRad * 0.5));
+
+        for (let y = 0; y < h; y += step) {
+            for (let x = 0; x < w; x += step) {
+                const idx = y * w + x;
+                if (binary[idx] === 1 && visited[idx] === 0) {
+                    // BFS Flood fill component
+                    const queue = [[x, y]];
+                    visited[idx] = 1;
+
+                    let area = 0;
+                    let sumX = 0;
+                    let sumY = 0;
+                    let minX = x, maxX = x, minY = y, maxY = y;
+                    let perimeter = 0;
+
+                    let qHead = 0;
+                    while (qHead < queue.length) {
+                        const [currX, currY] = queue[qHead++];
+                        area++;
+                        sumX += currX;
+                        sumY += currY;
+
+                        if (currX < minX) minX = currX;
+                        if (currX > maxX) maxX = currX;
+                        if (currY < minY) minY = currY;
+                        if (currY > maxY) maxY = currY;
+
+                        // Check 4-neighbors
+                        let isEdge = false;
+                        const neighbors = [
+                            [currX + 1, currY],
+                            [currX - 1, currY],
+                            [currX, currY + 1],
+                            [currX, currY - 1]
+                        ];
+
+                        for (let n = 0; n < 4; n++) {
+                            const [nx, ny] = neighbors[n];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                                const nIdx = ny * w + nx;
+                                if (binary[nIdx] === 1) {
+                                    if (visited[nIdx] === 0) {
+                                        visited[nIdx] = 1;
+                                        queue.push([nx, ny]);
+                                    }
+                                } else {
+                                    isEdge = true;
+                                }
+                            } else {
+                                isEdge = true;
+                            }
+                        }
+                        if (isEdge) perimeter++;
+                    }
+
+                    if (area >= minArea && area <= maxArea) {
+                        // Circularity calculation: 4 * PI * Area / (Perimeter^2)
+                        const circularity = perimeter > 0 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
+                        if (circularity >= circMin) {
+                            const objCenterX = sumX / area;
+                            const objCenterY = sumY / area;
+                            const estRadius = Math.max(minRad, Math.min(maxRad, Math.sqrt(area / Math.PI)));
+
+                            detectedColonies.push({
+                                id: nextId++,
+                                x: Math.round(objCenterX),
+                                y: Math.round(objCenterY),
+                                radius: Math.round(estRadius),
+                                area: Math.round(area),
+                                isManual: false
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        colonyState.colonies = detectedColonies;
+        renderColonyMarkers();
+        updateColonyStatistics();
+    }
+
+    function renderColonyMarkers() {
+        elements.colonyMarkersLayer.innerHTML = "";
+
+        const color = elements.colonyColorSelect.value;
+        const size = parseInt(elements.colonyMarkerSize.value, 10);
+        const showNums = elements.colonyShowNumbers.checked;
+
+        colonyState.colonies.forEach(col => {
+            const markerNode = document.createElement("div");
+            markerNode.className = "colony-marker-node";
+            markerNode.style.left = col.x + "px";
+            markerNode.style.top = col.y + "px";
+            markerNode.style.width = (size * 2) + "px";
+            markerNode.style.height = (size * 2) + "px";
+            markerNode.style.border = `2px solid ${color}`;
+            markerNode.style.backgroundColor = `${color}44`;
+
+            if (showNums) {
+                const idSpan = document.createElement("span");
+                idSpan.className = "colony-marker-id";
+                idSpan.textContent = col.id;
+                markerNode.appendChild(idSpan);
+            }
+
+            // Click to delete on individual marker
+            markerNode.addEventListener("click", (e) => {
+                e.stopPropagation();
+                deleteColonyMarker(col.id);
+            });
+
+            markerNode.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                deleteColonyMarker(col.id);
+            });
+
+            elements.colonyMarkersLayer.appendChild(markerNode);
+        });
+    }
+
+    function addManualColonyMarker(clickX, clickY) {
+        const nextId = (colonyState.colonies.reduce((max, c) => Math.max(max, c.id), 0) || 0) + 1;
+        const size = parseInt(elements.colonyMarkerSize.value, 10);
+
+        colonyState.colonies.push({
+            id: nextId,
+            x: Math.round(clickX),
+            y: Math.round(clickY),
+            radius: size,
+            area: Math.round(Math.PI * size * size),
+            isManual: true
+        });
+
+        renderColonyMarkers();
+        updateColonyStatistics();
+        showStatus(`Added manual colony #${nextId} at (${Math.round(clickX)}, ${Math.round(clickY)})`);
+    }
+
+    function deleteColonyMarker(colonyId) {
+        const idx = colonyState.colonies.findIndex(c => c.id === colonyId);
+        if (idx !== -1) {
+            colonyState.colonies.splice(idx, 1);
+            renderColonyMarkers();
+            updateColonyStatistics();
+            showStatus(`Removed colony marker #${colonyId}`);
+        }
+    }
+
+    function updateColonyStatistics() {
+        const count = colonyState.colonies.length;
+        const vol = parseFloat(elements.colonyVolumeInput.value) || 0.1;
+        const dilution = parseFloat(elements.colonyDilutionSelect.value) || 1.0;
+
+        const cfu = vol > 0 ? (count * dilution) / vol : 0;
+
+        elements.colonyStatCount.textContent = `${count} colonies`;
+        elements.colonyStatCfu.textContent = cfu.toLocaleString("en-US", { maximumFractionDigits: 1 });
+    }
+
+    // Colony Viewport Click Handler (Manual Click-to-add)
+    elements.colonyViewport.addEventListener("click", (e) => {
+        if (!colonyState.imageSrc) return;
+        const clickedOnMarker = e.target.closest(".colony-marker-node");
+        const clickedOnCanvas = e.target.closest("#colony-canvas-wrapper");
+
+        if (!clickedOnMarker && clickedOnCanvas) {
+            const rect = elements.colonyCanvasWrapper.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+            addManualColonyMarker(clickX, clickY);
+        }
+    });
+
+    // Colony Parameter Inputs Live Tuning
+    elements.colonySensSlider.addEventListener("input", (e) => {
+        elements.colonySensVal.textContent = e.target.value;
+        runColonyAiDetection();
+    });
+
+    elements.colonyCircSlider.addEventListener("input", (e) => {
+        elements.colonyCircVal.textContent = (parseInt(e.target.value, 10) / 100).toFixed(2);
+        runColonyAiDetection();
+    });
+
+    elements.colonyMinRad.addEventListener("change", runColonyAiDetection);
+    elements.colonyMaxRad.addEventListener("change", runColonyAiDetection);
+    elements.colonyMaskDish.addEventListener("change", runColonyAiDetection);
+    elements.colonyInvertMode.addEventListener("change", runColonyAiDetection);
+
+    // Marker styling changes
+    elements.colonyColorSelect.addEventListener("change", renderColonyMarkers);
+    elements.colonyMarkerSize.addEventListener("change", renderColonyMarkers);
+    elements.colonyShowNumbers.addEventListener("change", renderColonyMarkers);
+
+    // CFU inputs
+    elements.colonyVolumeInput.addEventListener("input", updateColonyStatistics);
+    elements.colonyDilutionSelect.addEventListener("change", updateColonyStatistics);
+
+    // File Drop & Browse Listeners for Colony Counter
+    elements.colonyFileInput.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
+    });
+    elements.colonyFileInputBtn.addEventListener("change", (e) => {
+        if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
+    });
+
+    elements.colonyViewport.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        elements.colonyDropzone.classList.add("dragover");
+    });
+    elements.colonyViewport.addEventListener("dragleave", () => {
+        elements.colonyDropzone.classList.remove("dragover");
+    });
+    elements.colonyViewport.addEventListener("drop", (e) => {
+        e.preventDefault();
+        elements.colonyDropzone.classList.remove("dragover");
+        if (e.dataTransfer.files.length > 0) {
+            handleColonyImageFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    // Colony Exports (PNG & CSV)
+    function exportColonyAnnotatedImage() {
+        if (!colonyState.imageSrc || colonyState.colonies.length === 0) {
+            showStatus("No colony data to export.");
+            return;
+        }
+
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+
+            // 1. Draw plate photo
+            ctx.drawImage(img, 0, 0);
+
+            // 2. Draw dish circle if active
+            if (colonyState.dishCircle) {
+                ctx.strokeStyle = "#00FFCC";
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 6]);
+                ctx.beginPath();
+                ctx.arc(colonyState.dishCircle.cx, colonyState.dishCircle.cy, colonyState.dishCircle.r, 0, 2 * Math.PI);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 3. Draw markers
+            const color = elements.colonyColorSelect.value;
+            const size = parseInt(elements.colonyMarkerSize.value, 10);
+            const showNums = elements.colonyShowNumbers.checked;
+
+            ctx.font = `bold ${Math.max(10, size)}px Arial`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+
+            colonyState.colonies.forEach(col => {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(col.x, col.y, size, 0, 2 * Math.PI);
+                ctx.stroke();
+
+                ctx.fillStyle = `${color}55`;
+                ctx.fill();
+
+                if (showNums) {
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.strokeStyle = "#000000";
+                    ctx.lineWidth = 2;
+                    ctx.strokeText(col.id.toString(), col.x + size + 2, col.y);
+                    ctx.fillText(col.id.toString(), col.x + size + 2, col.y);
+                }
+            });
+
+            // 4. Download file
+            const dataUrl = canvas.toDataURL("image/png");
+            const link = document.createElement("a");
+            link.download = (colonyState.fileName || "plate").replace(/\.[^/.]+$/, "") + "_counted.png";
+            link.href = dataUrl;
+            link.click();
+            showStatus("Annotated plate image exported successfully.");
+        };
+        img.src = colonyState.imageSrc;
+    }
+
+    function exportColonyCsvTable() {
+        if (colonyState.colonies.length === 0) {
+            showStatus("No colonies detected to export.");
+            return;
+        }
+
+        const vol = parseFloat(elements.colonyVolumeInput.value) || 0.1;
+        const dilution = parseFloat(elements.colonyDilutionSelect.value) || 1.0;
+        const cfu = (colonyState.colonies.length * dilution) / vol;
+
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "# Super Lab Suite - Colony & Seed AI Vision Report\n";
+        csvContent += `Source Image,${colonyState.fileName || "Unknown"}\n`;
+        csvContent += `Total Count,${colonyState.colonies.length}\n`;
+        csvContent += `Plated Volume (mL),${vol}\n`;
+        csvContent += `Dilution Factor,${dilution}\n`;
+        csvContent += `Calculated CFU/mL,${cfu.toFixed(2)}\n\n`;
+        csvContent += "Colony ID,X (px),Y (px),Radius (px),Area (px^2),Type\n";
+
+        colonyState.colonies.forEach(c => {
+            csvContent += `${c.id},${c.x},${c.y},${c.radius},${c.area},${c.isManual ? "Manual" : "AI Detected"}\n`;
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", (colonyState.fileName || "plate").replace(/\.[^/.]+$/, "") + "_colony_report.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showStatus("Colony CSV report exported successfully.");
+    }
+
+    elements.colonyExportImgBtn.addEventListener("click", exportColonyAnnotatedImage);
+    elements.colonyExportCsvBtn.addEventListener("click", exportColonyCsvTable);
+
     // --- Application Bootstrapping ---
 
     function initializeApplication() {
@@ -1444,7 +1969,7 @@
         }
         
         switchTab(state.activeTabId);
-        showStatus("Web Gel Labeler initialized. Ready for operations.");
+        showStatus("Super Lab Suite initialized. Ready for operations.");
     }
 
     initializeApplication();

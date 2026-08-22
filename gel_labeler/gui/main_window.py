@@ -606,6 +606,13 @@ class MainWindow(QMainWindow):
         self.profile_toggle_act.triggered.connect(self.toggle_profile_panel)
         view_menu.addAction(self.profile_toggle_act)
         
+        # --- Tools / Modules Menu ---
+        tools_menu = menubar.addMenu("Tools")
+        colony_action = QAction("🧫 AI Colony & Seed Counter...", self)
+        colony_action.setShortcut("Ctrl+Shift+C")
+        colony_action.triggered.connect(self.open_colony_counter_dialog)
+        tools_menu.addAction(colony_action)
+        
         # --- Help Menu ---
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About Gel Labeler", self)
@@ -631,6 +638,12 @@ class MainWindow(QMainWindow):
         toolbar.addAction(new_tab_btn)
         
         toolbar.addSeparator()
+        
+        # Colony Counter Tool Button
+        colony_btn = QAction("🧫", self)
+        colony_btn.setToolTip("AI Colony & Seed Counter (Ctrl+Shift+C)")
+        colony_btn.triggered.connect(self.open_colony_counter_dialog)
+        toolbar.addAction(colony_btn)
         
         # Fit View Button
         fit_btn = QAction("⛶", self)
@@ -1225,6 +1238,12 @@ class MainWindow(QMainWindow):
 
     def handle_grid_dialog_closed(self):
         self._grid_overlay_dialog = None
+
+    def open_colony_counter_dialog(self):
+        """Launches the standalone AI Vision Colony & Seed Counter dialog."""
+        from gel_labeler.gui.colony_counter_dialog import ColonyCounterDialog
+        dialog = ColonyCounterDialog(self)
+        dialog.exec()
 
     def start_span_marking_dialog(self):
         """Opens config dialog and starts interactive 2-click span marking."""

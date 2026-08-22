@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PCR Gel Genie - Web Gel Labeler</title>
+    <title>Super Lab Suite — PCR Gel Genie & AI Colony Counter</title>
     <!-- Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,25 +17,35 @@
 </head>
 <body>
     <div id="app">
-        <!-- Top Toolbar -->
+        <!-- Top App Navigation Suite Header -->
         <header class="app-header">
             <div class="logo-area">
                 <img src="logo.png" alt="Logo" class="app-logo" onerror="this.style.display='none'">
-                <h1>PCR Gel Genie <span class="badge">Web</span></h1>
+                <h1>Super Lab <span class="badge">Suite</span></h1>
+            </div>
+
+            <!-- Suite Module Switcher -->
+            <div class="suite-switcher">
+                <button id="nav-gel-btn" class="suite-tab active" title="PCR Gel Electrophoresis Image Labeler">
+                    <i class="fa-solid fa-bolt"></i> PCR Gel Genie
+                </button>
+                <button id="nav-colony-btn" class="suite-tab" title="AI Vision Colony and Seed Counter">
+                    <i class="fa-solid fa-circle-dot"></i> Colony & Seed AI Counter
+                </button>
             </div>
             
-            <!-- Tab switches -->
-            <div class="tab-bar-container">
+            <!-- Gel Module Tab Switches (visible when Gel Genie is active) -->
+            <div class="tab-bar-container" id="gel-tab-bar-container">
                 <div class="tab-bar" id="tab-bar">
-                    <!-- Tabs will be dynamically created here -->
+                    <!-- Tabs dynamically created here -->
                 </div>
                 <button id="add-tab-btn" class="icon-btn" title="Add New Gel Tab">
                     <i class="fa-solid fa-plus"></i>
                 </button>
             </div>
 
-            <!-- Global Action Controls -->
-            <div class="global-actions">
+            <!-- Gel Global Action Controls -->
+            <div class="global-actions" id="gel-global-actions">
                 <button id="undo-btn" class="action-btn header-btn" title="Undo (Ctrl+Z)" disabled>
                     <i class="fa-solid fa-rotate-left"></i> Undo
                 </button>
@@ -49,9 +59,20 @@
                     <i class="fa-solid fa-file-powerpoint"></i> Export PPTX
                 </button>
             </div>
+
+            <!-- Colony Global Action Controls -->
+            <div class="global-actions hidden" id="colony-global-actions">
+                <button id="colony-export-img-btn" class="action-btn primary-btn" title="Download marked plate image">
+                    <i class="fa-solid fa-file-image"></i> Export Plate PNG
+                </button>
+                <button id="colony-export-csv-btn" class="action-btn success-btn" title="Export colony count data table">
+                    <i class="fa-solid fa-file-csv"></i> Export CSV
+                </button>
+            </div>
         </header>
 
-        <div class="main-content">
+        <!-- ==================== MODULE 1: PCR GEL GENIE ==================== -->
+        <div id="gel-module" class="main-content">
             <!-- Sidebar Panel: Controls & Options -->
             <aside class="control-panel">
                 <!-- 1. Click Mode Section -->
@@ -233,7 +254,152 @@
             </main>
         </div>
 
-        <!-- Custom Edit Label Dialog Modal (Modeless simulation inline overlay) -->
+        <!-- ==================== MODULE 2: COLONY & SEED AI COUNTER ==================== -->
+        <div id="colony-module" class="main-content hidden">
+            <!-- Sidebar: Parameters & CFU Calculation -->
+            <aside class="control-panel">
+                <!-- 1. Plate Loader Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-folder-open"></i> Plate / Tray Image</h2>
+                    <div class="section-content">
+                        <label for="colony-file-input" class="action-btn primary-btn w-100 select-file-label text-center">
+                            <i class="fa-solid fa-upload"></i> Load Plate Image
+                        </label>
+                        <input type="file" id="colony-file-input" accept="image/*" class="hidden-file-input">
+                        <div id="colony-img-info" class="mt-2 text-muted font-11">No plate image loaded</div>
+                    </div>
+                </section>
+
+                <!-- 2. AI Vision Tuning -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-brain"></i> AI Vision Parameters</h2>
+                    <div class="section-content">
+                        <div class="slider-row">
+                            <div class="slider-header">
+                                <label for="colony-sens-slider">Sensitivity:</label>
+                                <span id="colony-sens-val">50</span>
+                            </div>
+                            <input type="range" id="colony-sens-slider" min="1" max="100" value="50">
+                        </div>
+
+                        <div class="form-row mt-2">
+                            <div class="form-group">
+                                <label for="colony-min-rad">Min Radius (px):</label>
+                                <input type="number" id="colony-min-rad" min="1" max="100" value="4">
+                            </div>
+                            <div class="form-group">
+                                <label for="colony-max-rad">Max Radius (px):</label>
+                                <input type="number" id="colony-max-rad" min="5" max="500" value="45">
+                            </div>
+                        </div>
+
+                        <div class="slider-row mt-2">
+                            <div class="slider-header">
+                                <label for="colony-circ-slider">Circularity Filter:</label>
+                                <span id="colony-circ-val">0.35</span>
+                            </div>
+                            <input type="range" id="colony-circ-slider" min="5" max="95" value="35">
+                        </div>
+
+                        <div class="toggle-row mt-2">
+                            <input type="checkbox" id="colony-mask-dish" checked>
+                            <label for="colony-mask-dish" class="check-label font-11">Auto-Mask Dish Rim</label>
+                        </div>
+
+                        <div class="toggle-row">
+                            <input type="checkbox" id="colony-invert-mode">
+                            <label for="colony-invert-mode" class="check-label font-11">Invert (Light/Fluorescent Colonies)</label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. Marker Styling -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-palette"></i> Marker Appearance</h2>
+                    <div class="section-content">
+                        <div class="form-group">
+                            <label for="colony-color-select">Marker Color:</label>
+                            <select id="colony-color-select">
+                                <option value="#FF3366">🔴 Neon Red</option>
+                                <option value="#00FFFF">🔵 Electric Cyan</option>
+                                <option value="#00FF00">🟢 Neon Green</option>
+                                <option value="#FFFF00">🟡 Vibrant Yellow</option>
+                                <option value="#FFFFFF">⚪ Pure White</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="colony-marker-size">Marker Size (px):</label>
+                            <input type="number" id="colony-marker-size" min="3" max="50" value="10">
+                        </div>
+                        <div class="toggle-row mt-2">
+                            <input type="checkbox" id="colony-show-numbers" checked>
+                            <label for="colony-show-numbers" class="check-label font-11">Show Colony ID Numbers</label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 4. CFU / Density Calculator -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-calculator"></i> CFU / Density Calculator</h2>
+                    <div class="section-content">
+                        <div class="form-group">
+                            <label for="colony-volume-input">Plated Volume (mL):</label>
+                            <input type="number" id="colony-volume-input" step="0.01" min="0.001" max="1000" value="0.100">
+                        </div>
+                        <div class="form-group">
+                            <label for="colony-dilution-select">Dilution Factor:</label>
+                            <select id="colony-dilution-select">
+                                <option value="1">10⁰ (Undiluted - 1x)</option>
+                                <option value="10">10⁻¹ (1:10)</option>
+                                <option value="100">10⁻² (1:100)</option>
+                                <option value="1000">10⁻³ (1:1,000)</option>
+                                <option value="10000">10⁻⁴ (1:10,000)</option>
+                                <option value="100000">10⁻⁵ (1:100,000)</option>
+                                <option value="1000000">10⁻⁶ (1:1,000,000)</option>
+                            </select>
+                        </div>
+                        <div class="stat-box mt-2">
+                            <div class="stat-label">Total Count:</div>
+                            <div id="colony-stat-count" class="stat-value text-accent">0 colonies</div>
+                        </div>
+                        <div class="stat-box mt-1">
+                            <div class="stat-label">Calculated CFU/mL:</div>
+                            <div id="colony-stat-cfu" class="stat-value text-cyan">0.00</div>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Main Interactive Colony Canvas Viewport -->
+            <main class="canvas-viewport" id="colony-viewport">
+                <!-- Dropzone Area -->
+                <div class="upload-dropzone" id="colony-dropzone">
+                    <div class="dropzone-content">
+                        <i class="fa-solid fa-circle-nodes cloud-icon text-accent"></i>
+                        <h3>Drag & Drop Petri Dish or Seed Photo</h3>
+                        <p>Supports Agar Plates, Blood Agar, Petri Dishes, and Seed Trays</p>
+                        <span class="or-separator">or</span>
+                        <label for="colony-file-input-btn" class="action-btn primary-btn select-file-label">
+                            Browse Local Files
+                        </label>
+                        <input type="file" id="colony-file-input-btn" accept="image/*" class="hidden-file-input">
+                    </div>
+                </div>
+
+                <!-- Canvas Area -->
+                <div class="canvas-container hidden" id="colony-canvas-container">
+                    <div class="canvas-wrapper" id="colony-canvas-wrapper">
+                        <img id="colony-image-display" src="" alt="Petri Dish Plate">
+                        <!-- SVG Rim Mask Overlay -->
+                        <svg class="grid-overlay-svg" id="colony-dish-svg"></svg>
+                        <!-- Markers Layer -->
+                        <div class="labels-layer" id="colony-markers-layer"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Custom Edit Label Dialog Modal (For Gel Genie) -->
         <div class="modal-overlay hidden" id="edit-label-modal">
             <div class="modal-card">
                 <div class="modal-header">
@@ -290,12 +456,15 @@
 
         <!-- Footer / Status Readout -->
         <footer class="app-status">
-            <div id="status-message">Ready. Please upload a gel electrophoresis image to get started.</div>
+            <div id="status-message">Super Lab Suite ready.</div>
             <div class="status-indicators">
                 <span id="coord-display"><i class="fa-solid fa-crosshairs"></i> X: - , Y: -</span>
                 <span id="selection-count"><i class="fa-solid fa-object-group"></i> 0 selected</span>
             </div>
         </footer>
     </div>
+
+    <!-- Core App Logic -->
+    <script src="app.js"></script>
 </body>
 </html>
