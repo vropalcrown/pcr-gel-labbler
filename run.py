@@ -11,14 +11,14 @@ def main():
     app = QApplication(sys.argv)
     
     # Set app-wide metadata
-    app.setApplicationName("Gel Electrophoresis Image Labeler")
+    app.setApplicationName("Super Lab Suite - Gel Genie & AI Colony Counter")
     app.setOrganizationName("Bioinformatics Tools")
     
     window = MainWindow()
     window.show()
+    window.raise_()
+    window.activateWindow()
     sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
-
-
