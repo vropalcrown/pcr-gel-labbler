@@ -1893,26 +1893,3 @@ class MainWindow(QMainWindow):
                 self.profile_toolbar_btn.blockSignals(True)
                 self.profile_toolbar_btn.setChecked(self.profile_panel.isVisible())
                 self.profile_toolbar_btn.blockSignals(False)
-
-    def closeEvent(self, event):
-        """Asks user to save changes before closing if any tab has unsaved changes."""
-        any_dirty = False
-        for idx in range(self.tab_widget.count()):
-            tab = self.tab_widget.widget(idx)
-            if tab and tab.project.is_dirty:
-                any_dirty = True
-                break
-                
-        if any_dirty:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes",
-                "You have unsaved label edits on one or more tabs. Are you sure you want to exit and discard changes?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                event.accept()
-            else:
-                event.ignore()
-        else:
-            event.accept()

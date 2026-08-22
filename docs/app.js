@@ -532,14 +532,13 @@
         
         // Start dragging
         dragData.active = true;
+        dragData.hasMoved = false;
         dragData.startX = e.clientX;
         dragData.startY = e.clientY;
         dragData.initialPositions = tab.selectedIds.map(id => {
             const l = tab.labels[id];
             return { id: l.id, x: l.x, y: l.y };
         });
-        
-        saveUndoState(tab); // Save state before moving starts
         
         document.addEventListener("mousemove", handleLabelMouseMove);
         document.addEventListener("mouseup", handleLabelMouseUp);
@@ -553,6 +552,13 @@
         
         const dx = e.clientX - dragData.startX;
         const dy = e.clientY - dragData.startY;
+        
+        if (!dragData.hasMoved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+            saveUndoState(tab); // Save state on first actual movement
+            dragData.hasMoved = true;
+        }
+        
+        if (!dragData.hasMoved) return;
         
         // Update positions on screen in real-time
         dragData.initialPositions.forEach(pos => {
@@ -573,11 +579,15 @@
 
     function handleLabelMouseUp() {
         if (dragData.active) {
+            const hadMoved = dragData.hasMoved;
             dragData.active = false;
+            dragData.hasMoved = false;
             document.removeEventListener("mousemove", handleLabelMouseMove);
             document.removeEventListener("mouseup", handleLabelMouseUp);
-            autosaveSession();
-            showStatus("Moved selected labels.");
+            if (hadMoved) {
+                autosaveSession();
+                showStatus("Moved selected labels.");
+            }
         }
     }
 
@@ -1067,29 +1077,33 @@
                 
                 // Bounding calculations
                 ctx.font = `bold ${label.fontSize}px ${label.fontFamily || 'Arial'}`;
-                const textWidth = ctx.measureText(label.text).width;
-                const textHeight = label.fontSize; // Approximation
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
                 
-                // Translate context to center of label
-                const cx = label.x + textWidth / 2;
-                const cy = label.y + textHeight / 2;
+                const textMetrics = ctx.measureText(label.text);
+                const textWidth = textMetrics.width;
+                const textHeight = label.fontSize;
+                
+                // Translate context to center of label box (matching DOM padding of 4px horizontal, 2px vertical)
+                const cx = label.x + (textWidth + 8) / 2;
+                const cy = label.y + (textHeight + 4) / 2;
                 ctx.translate(cx, cy);
                 
-                // Apply rotation
+                // Apply rotation around center
                 if (label.rotation) {
                     ctx.rotate((label.rotation * Math.PI) / 180);
                 }
                 
-                // Draw outline for legibility
+                // Draw high-contrast outline for legibility
                 ctx.strokeStyle = "#000000";
-                ctx.lineWidth = 3;
+                ctx.lineWidth = Math.max(2, Math.round(label.fontSize * 0.22));
                 ctx.lineJoin = "round";
                 ctx.miterLimit = 2;
-                ctx.strokeText(label.text, -textWidth / 2, textHeight / 2);
+                ctx.strokeText(label.text, 0, 0);
                 
                 // Draw text
                 ctx.fillStyle = label.color;
-                ctx.fillText(label.text, -textWidth / 2, textHeight / 2);
+                ctx.fillText(label.text, 0, 0);
                 
                 ctx.restore();
             });
