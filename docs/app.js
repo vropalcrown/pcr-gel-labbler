@@ -1469,7 +1469,7 @@
     });
 
     // =========================================================================
-    // ================== SUPER LAB SUITE MODULE NAVIGATION =====================
+    // ================== GEL LABELER MODULE NAVIGATION =====================
     // =========================================================================
 
     let currentModule = "gel"; // "gel" or "colony"
@@ -1931,7 +1931,7 @@
         const cfu = (colonyState.colonies.length * dilution) / vol;
 
         let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "# Super Lab Suite - Colony & Seed AI Vision Report\n";
+        csvContent += "# Gel Labeler - Colony & Seed AI Vision Report\n";
         csvContent += `Source Image,${colonyState.fileName || "Unknown"}\n`;
         csvContent += `Total Count,${colonyState.colonies.length}\n`;
         csvContent += `Plated Volume (mL),${vol}\n`;
@@ -1969,7 +1969,7 @@
         }
         
         switchTab(state.activeTabId);
-        showStatus("Super Lab Suite initialized. Ready for operations.");
+        showStatus("Gel Labeler initialized. Ready for operations.");
     }
 
     initializeApplication();

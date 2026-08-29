@@ -6,14 +6,14 @@ def create_desktop_shortcut():
     script_dir = os.path.abspath(os.path.dirname(__file__))
     target_bat = os.path.join(script_dir, "launch.bat")
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    shortcut_path = os.path.join(desktop, "Super Lab Suite.lnk")
+    shortcut_path = os.path.join(desktop, "Gel Labeler.lnk")
     
     vbs_content = f'''Set oWS = WScript.CreateObject("WScript.Shell")
 sLinkFile = "{shortcut_path}"
 Set oLink = oWS.CreateShortcut(sLinkFile)
 oLink.TargetPath = "{target_bat}"
 oLink.WorkingDirectory = "{script_dir}"
-oLink.Description = "Super Lab Suite - Gel Genie and AI Colony Counter"
+oLink.Description = "Gel Labeler - PCR Gel Genie & AI Colony Counter"
 oLink.Save
 '''
     

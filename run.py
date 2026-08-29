@@ -11,7 +11,7 @@ def main():
     app = QApplication(sys.argv)
     
     # Set app-wide metadata
-    app.setApplicationName("Super Lab Suite - Gel Genie & AI Colony Counter")
+    app.setApplicationName("Gel Labeler")
     app.setOrganizationName("Bioinformatics Tools")
     
     window = MainWindow()

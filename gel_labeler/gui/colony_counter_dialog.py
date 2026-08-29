@@ -161,7 +161,7 @@ class ColonyCounterDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🧫 AI Vision Colony & Seed Counter — Super Lab Suite")
+        self.setWindowTitle("🧫 AI Vision Colony & Seed Counter — Gel Labeler")
         self.resize(1150, 720)
         self.setMinimumSize(900, 600)
 

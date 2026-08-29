@@ -1,7 +1,7 @@
 @echo off
-title Super Lab Suite - Create Desktop Shortcut
+title Gel Labeler - Create Desktop Shortcut
 cd /d "%~dp0"
-echo Creating Desktop shortcut for Super Lab Suite on this computer...
+echo Creating Desktop shortcut for Gel Labeler on this computer...
 python create_shortcut.py
 if %ERRORLEVEL% NEQ 0 (
     echo.

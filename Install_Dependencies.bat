@@ -1,8 +1,8 @@
 @echo off
-title Super Lab Suite - One-Click Dependency Installer
+title Gel Labeler - One-Click Dependency Installer
 cd /d "%~dp0"
 echo ========================================================
-echo   Super Lab Suite - Installing Required Libraries
+echo   Gel Labeler - Installing Required Libraries
 echo ========================================================
 echo.
 python --version >nul 2>&1
