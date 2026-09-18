@@ -888,3 +888,72 @@ input[type="range"]::-webkit-slider-thumb:hover {
     pointer-events: none;
 }
 
+/* Span Mode (Mark Well Boundaries) Banner & Helpers */
+.span-guide-banner {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26, 26, 26, 0.95);
+    border: 1.5px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 15px rgba(226, 156, 61, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 100;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 500;
+    backdrop-filter: blur(8px);
+    animation: slideDownBanner 0.25s ease-out;
+}
+
+@keyframes slideDownBanner {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -20px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+.text-accent {
+    color: var(--accent);
+}
+
+.pulse-icon {
+    font-size: 16px;
+    animation: pulseIcon 1.5s infinite;
+}
+
+@keyframes pulseIcon {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.25);
+        opacity: 0.75;
+    }
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+
+/* Span placement cursor on canvas */
+.canvas-wrapper.span-mode-cursor,
+.span-mode-active #canvas-wrapper,
+.span-mode-active .canvas-viewport {
+    cursor: crosshair !important;
+}
+
+.span-mode-active .gel-label-item {
+    pointer-events: none; /* Ignore individual label events during span point clicks */
+}
+

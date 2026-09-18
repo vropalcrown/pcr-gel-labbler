@@ -75,23 +75,40 @@
         <div id="gel-module" class="main-content">
             <!-- Sidebar Panel: Controls & Options -->
             <aside class="control-panel">
-                <!-- 1. Click Mode Section -->
-                <section class="panel-section">
-                    <h2 class="section-title"><i class="fa-solid fa-computer-mouse"></i> Click Interaction</h2>
+                <!-- 1. Mark Well Boundaries Section (Span Placement) -->
+                <section class="panel-section" id="well-boundaries-section">
+                    <h2 class="section-title"><i class="fa-solid fa-ruler-horizontal"></i> Mark Well Boundaries</h2>
                     <div class="section-content">
-                        <label for="click-mode-select">Placement Mode:</label>
-                        <select id="click-mode-select">
-                            <option value="disabled">🚫 Disabled (Selection / Pan)</option>
-                            <option value="auto-number">🔢 Auto-Numbering (e.g. 1, 2, 3)</option>
-                            <option value="custom">✍️ Custom Text</option>
-                        </select>
-                        
-                        <div id="custom-text-input-wrap" class="hidden-field">
-                            <label for="custom-text-input">Next Label Text:</label>
-                            <div class="input-with-button">
-                                <input type="text" id="custom-text-input" value="L1" placeholder="e.g. L1, Ladder, P1">
+                        <div class="form-group">
+                            <label for="span-tier-select">Select Deck / Tier:</label>
+                            <select id="span-tier-select">
+                                <option value="Tier 1 (Top)">Tier 1 (Top)</option>
+                                <option value="Tier 2 (Bottom)">Tier 2 (Bottom)</option>
+                                <option value="Custom Deck">Custom Deck</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="span-pattern-input">Lanes Pattern:</label>
+                            <input type="text" id="span-pattern-input" value="Ladder, 1-29" placeholder="e.g. Ladder, 1-29 or Ladder, P1, P2, 1-26">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="span-rotation-select">Rotation:</label>
+                                <select id="span-rotation-select">
+                                    <option value="0">0° (Horiz)</option>
+                                    <option value="90">90° (Down)</option>
+                                    <option value="270">270° (Up)</option>
+                                    <option value="45">45° (Slant)</option>
+                                </select>
+                            </div>
+                            <div class="form-group size-group">
+                                <label for="span-size-input">Font Size:</label>
+                                <input type="number" id="span-size-input" min="8" max="72" value="12">
                             </div>
                         </div>
+                        <button id="start-span-btn" class="action-btn primary-btn w-100 mt-2" title="Click first and last well to interpolate lane labels">
+                            <i class="fa-solid fa-crosshairs"></i> Mark Well Boundaries
+                        </button>
                     </div>
                 </section>
 
@@ -224,6 +241,15 @@
 
             <!-- Main Interactive Canvas Viewport -->
             <main class="canvas-viewport" id="canvas-viewport">
+                <!-- Span Mode Interactive Guide Banner -->
+                <div id="span-guide-banner" class="span-guide-banner hidden">
+                    <i class="fa-solid fa-crosshairs text-accent pulse-icon"></i>
+                    <span id="span-guide-text">Span Mode: Click the <strong>leftmost well</strong> (1st point)</span>
+                    <button id="cancel-span-btn" class="action-btn header-btn btn-sm" title="Cancel Span Placement (Esc)">
+                        <i class="fa-solid fa-xmark"></i> Cancel (Esc)
+                    </button>
+                </div>
+
                 <!-- Empty State Upload Area -->
                 <div class="upload-dropzone" id="upload-dropzone">
                     <div class="dropzone-content">

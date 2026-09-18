@@ -38,9 +38,16 @@
         redoBtn: document.getElementById("redo-btn"),
         exportImgBtn: document.getElementById("export-img-btn"),
         exportPptxBtn: document.getElementById("export-pptx-btn"),
-        clickModeSelect: document.getElementById("click-mode-select"),
-        customTextInputWrap: document.getElementById("custom-text-input-wrap"),
-        customTextInput: document.getElementById("custom-text-input"),
+        // Mark Well Boundaries (Span Mode) Controls
+        spanTierSelect: document.getElementById("span-tier-select"),
+        spanPatternInput: document.getElementById("span-pattern-input"),
+        spanRotationSelect: document.getElementById("span-rotation-select"),
+        spanSizeInput: document.getElementById("span-size-input"),
+        startSpanBtn: document.getElementById("start-span-btn"),
+        spanGuideBanner: document.getElementById("span-guide-banner"),
+        spanGuideText: document.getElementById("span-guide-text"),
+        cancelSpanBtn: document.getElementById("cancel-span-btn"),
+        // Font & Styling Controls
         fontFamilySelect: document.getElementById("font-family-select"),
         fontSizeInput: document.getElementById("font-size-input"),
         colorSwatches: document.getElementById("color-swatches"),
@@ -128,6 +135,165 @@
         return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     }
 
+    // --- Lane Pattern Parser (Supports ranges like 1-29, S111-S119, literal names, commas) ---
+    function parseLabelPattern(pattern) {
+        if (!pattern || !pattern.trim()) return [];
+        const parts = pattern.split(",").map(p => p.trim()).filter(Boolean);
+        const labels = [];
+        
+        for (const part of parts) {
+            if (part.includes("-")) {
+                const subparts = part.split("-");
+                if (subparts.length === 2) {
+                    const startStr = subparts[0].trim();
+                    const endStr = subparts[1].trim();
+                    
+                    // Case 1: Simple numeric range (e.g. 1-26 or 26-1)
+                    if (/^\d+$/.test(startStr) && /^\d+$/.test(endStr)) {
+                        const start = parseInt(startStr, 10);
+                        const end = parseInt(endStr, 10);
+                        const step = start <= end ? 1 : -1;
+                        for (let n = start; step > 0 ? n <= end : n >= end; n += step) {
+                            labels.push(n.toString());
+                        }
+                        continue;
+                    }
+                    
+                    // Case 2: Letter-prefixed range (e.g. S111-S119 or L1-L30 or P01-P09)
+                    const mStart = startStr.match(/^([a-zA-Z_]+)(\d+)$/);
+                    const mEnd = endStr.match(/^([a-zA-Z_]+)(\d+)$/);
+                    if (mStart && mEnd && mStart[1] === mEnd[1]) {
+                        const prefix = mStart[1];
+                        const startVal = parseInt(mStart[2], 10);
+                        const endVal = parseInt(mEnd[2], 10);
+                        const padLen = (startStr.startsWith(prefix + "0") || endStr.startsWith(prefix + "0"))
+                            ? Math.max(mStart[2].length, mEnd[2].length) : 0;
+                        const step = startVal <= endVal ? 1 : -1;
+                        for (let val = startVal; step > 0 ? val <= endVal : val >= endVal; val += step) {
+                            const numStr = padLen > 0 ? val.toString().padStart(padLen, "0") : val.toString();
+                            labels.push(`${prefix}${numStr}`);
+                        }
+                        continue;
+                    }
+                }
+            }
+            labels.push(part);
+        }
+        return labels;
+    }
+
+    // --- Mark Well Boundaries (Span Placement) State & Engine ---
+    let spanState = {
+        active: false,
+        firstPoint: null, // { x, y } in native image coords
+        tierName: "Tier 1 (Top)",
+        pattern: "Ladder, 1-29",
+        rotation: 0,
+        fontSize: 12
+    };
+
+    function enterSpanMode() {
+        const tab = getActiveTab();
+        if (!tab || !tab.imageSrc) {
+            showStatus("Please load a gel image first before marking well boundaries.");
+            return;
+        }
+        
+        spanState.active = true;
+        spanState.firstPoint = null;
+        spanState.tierName = elements.spanTierSelect ? elements.spanTierSelect.value : "Tier 1 (Top)";
+        spanState.pattern = elements.spanPatternInput ? elements.spanPatternInput.value.trim() : "Ladder, 1-29";
+        spanState.rotation = elements.spanRotationSelect ? parseInt(elements.spanRotationSelect.value, 10) || 0 : 0;
+        spanState.fontSize = elements.spanSizeInput ? parseInt(elements.spanSizeInput.value, 10) || 12 : 12;
+        
+        document.body.classList.add("span-mode-active");
+        if (elements.canvasWrapper) elements.canvasWrapper.classList.add("span-mode-cursor");
+        if (elements.spanGuideBanner) {
+            elements.spanGuideBanner.classList.remove("hidden");
+            elements.spanGuideText.innerHTML = `Span Mode: Click the <strong>leftmost well</strong> (1st boundary point) for ${spanState.tierName}`;
+        }
+        
+        clearSpanPreviewSvg();
+        showStatus(`Span Mode Active: Click the leftmost well for ${spanState.tierName}`);
+    }
+
+    function cancelSpanMode() {
+        if (!spanState.active) return;
+        spanState.active = false;
+        spanState.firstPoint = null;
+        
+        document.body.classList.remove("span-mode-active");
+        if (elements.canvasWrapper) elements.canvasWrapper.classList.remove("span-mode-cursor");
+        if (elements.spanGuideBanner) elements.spanGuideBanner.classList.add("hidden");
+        clearSpanPreviewSvg();
+        showStatus("Span well boundary placement cancelled.");
+    }
+
+    function clearSpanPreviewSvg() {
+        if (!elements.gridOverlaySvg) return;
+        const oldPreviews = elements.gridOverlaySvg.querySelectorAll(".span-preview-element");
+        oldPreviews.forEach(el => el.remove());
+    }
+
+    function renderSpanPreview(pt1, pt2, labelsCount) {
+        clearSpanPreviewSvg();
+        if (!pt1 || !pt2 || !elements.gridOverlaySvg) return;
+        
+        const svgNS = "http://www.w3.org/2000/svg";
+        
+        // 1. Dashed interpolation reference line
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", pt1.x);
+        line.setAttribute("y1", pt1.y);
+        line.setAttribute("x2", pt2.x);
+        line.setAttribute("y2", pt2.y);
+        line.setAttribute("stroke", "#FF0055");
+        line.setAttribute("stroke-width", "2.5");
+        line.setAttribute("stroke-dasharray", "6,4");
+        line.classList.add("span-preview-element");
+        elements.gridOverlaySvg.appendChild(line);
+        
+        // 2. Start point marker
+        const c1 = document.createElementNS(svgNS, "circle");
+        c1.setAttribute("cx", pt1.x);
+        c1.setAttribute("cy", pt1.y);
+        c1.setAttribute("r", "7");
+        c1.setAttribute("fill", "rgba(255, 0, 85, 0.85)");
+        c1.setAttribute("stroke", "#FFFFFF");
+        c1.setAttribute("stroke-width", "2");
+        c1.classList.add("span-preview-element");
+        elements.gridOverlaySvg.appendChild(c1);
+        
+        // 3. End point marker
+        const c2 = document.createElementNS(svgNS, "circle");
+        c2.setAttribute("cx", pt2.x);
+        c2.setAttribute("cy", pt2.y);
+        c2.setAttribute("r", "7");
+        c2.setAttribute("fill", "rgba(0, 255, 255, 0.85)");
+        c2.setAttribute("stroke", "#FFFFFF");
+        c2.setAttribute("stroke-width", "2");
+        c2.classList.add("span-preview-element");
+        elements.gridOverlaySvg.appendChild(c2);
+        
+        // 4. Intermediate tick markers showing lane positions
+        if (labelsCount && labelsCount > 2) {
+            for (let i = 1; i < labelsCount - 1; i++) {
+                const t = i / (labelsCount - 1);
+                const x = pt1.x + t * (pt2.x - pt1.x);
+                const y = pt1.y + t * (pt2.y - pt1.y);
+                const dot = document.createElementNS(svgNS, "circle");
+                dot.setAttribute("cx", x);
+                dot.setAttribute("cy", y);
+                dot.setAttribute("r", "3.5");
+                dot.setAttribute("fill", "#00FF00");
+                dot.setAttribute("stroke", "#000000");
+                dot.setAttribute("stroke-width", "1");
+                dot.classList.add("span-preview-element");
+                elements.gridOverlaySvg.appendChild(dot);
+            }
+        }
+    }
+
     function createNewTabState(name) {
         return {
             id: generateId(),
@@ -144,8 +310,6 @@
             gridYOffset: 0,
             gridColor: "#E29C3D",
             slideTitle: "",
-            clickMode: "disabled",
-            nextLabelText: "L1",
             defaultLabelFontFamily: "Arial",
             defaultLabelSize: 12,
             defaultLabelColor: "#00FF00",
@@ -362,15 +526,6 @@
     }
 
     function syncSettingsPanelToTab(tab) {
-        // Mode dropdown
-        elements.clickModeSelect.value = tab.clickMode;
-        if (tab.clickMode === "custom" || tab.clickMode === "auto-number") {
-            elements.customTextInputWrap.classList.add("visible");
-            elements.customTextInput.value = tab.nextLabelText;
-        } else {
-            elements.customTextInputWrap.classList.remove("visible");
-        }
-        
         // Font settings
         elements.fontFamilySelect.value = tab.defaultLabelFontFamily;
         elements.fontSizeInput.value = tab.defaultLabelSize;
@@ -520,12 +675,6 @@
         // Auto select newly placed label
         tab.selectedIds = [label.id];
         
-        // Handle auto-incrementing text
-        if (tab.clickMode === "auto-number" || tab.clickMode === "custom") {
-            tab.nextLabelText = incrementLabelString(tab.nextLabelText);
-            elements.customTextInput.value = tab.nextLabelText;
-        }
-        
         renderActiveTabLabels();
         updateSelectionStatus();
         autosaveSession();
@@ -634,43 +783,157 @@
         const tab = getActiveTab();
         if (!tab || !tab.imageSrc) return;
         
-        // Clicking outside active label clears selections unless shift is pressed or placement mode is active
+        // 1. Handle Mark Well Boundaries (Span Mode)
+        if (spanState.active) {
+            if (e.button === 0) { // Left-click
+                const rect = elements.canvasWrapper.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                
+                // Ensure click is within image bounds
+                if (clickX >= 0 && clickX <= tab.imageWidth && clickY >= 0 && clickY <= tab.imageHeight) {
+                    if (!spanState.firstPoint) {
+                        // Capture First Point (leftmost well)
+                        spanState.firstPoint = { x: Math.round(clickX), y: Math.round(clickY) };
+                        if (elements.spanGuideBanner) {
+                            elements.spanGuideText.innerHTML = `Span Mode: Click the <strong>rightmost well</strong> (2nd boundary point) for ${spanState.tierName}`;
+                        }
+                        renderSpanPreview(spanState.firstPoint, spanState.firstPoint, 0);
+                        showStatus(`First well anchored at (${Math.round(clickX)}, ${Math.round(clickY)}). Now click the rightmost well.`);
+                    } else {
+                        // Capture Second Point (rightmost well) and generate labels
+                        const pt1 = spanState.firstPoint;
+                        const pt2 = { x: Math.round(clickX), y: Math.round(clickY) };
+                        
+                        const labels = parseLabelPattern(spanState.pattern);
+                        if (labels.length === 0) {
+                            showStatus("Error: No labels parsed from pattern.");
+                            cancelSpanMode();
+                            return;
+                        }
+                        
+                        saveUndoState(tab);
+                        
+                        // Clear existing labels in span corridor to prevent overlap (matches desktop behavior)
+                        const yMin = Math.min(pt1.y, pt2.y) - 30;
+                        const yMax = Math.max(pt1.y, pt2.y) + 30;
+                        const xMin = Math.min(pt1.x, pt2.x) - 30;
+                        const xMax = Math.max(pt1.x, pt2.x) + 30;
+                        
+                        Object.keys(tab.labels).forEach(lid => {
+                            const lbl = tab.labels[lid];
+                            if (lbl.x >= xMin && lbl.x <= xMax && lbl.y >= yMin && lbl.y <= yMax) {
+                                delete tab.labels[lid];
+                            }
+                        });
+                        
+                        // Linearly interpolate lane label positions
+                        const nLabels = labels.length;
+                        const placedIds = [];
+                        for (let i = 0; i < nLabels; i++) {
+                            const t = nLabels > 1 ? i / (nLabels - 1) : 0.5;
+                            const x = pt1.x + t * (pt2.x - pt1.x);
+                            const y = pt1.y + t * (pt2.y - pt1.y);
+                            const labelText = labels[i];
+                            
+                            let rot = spanState.rotation;
+                            // Automatic forced 270 deg rotation for any "Ladder" label if orientation is horizontal
+                            if (labelText.toLowerCase().includes("ladder") && rot === 0) {
+                                rot = 270;
+                            }
+                            
+                            const newLbl = {
+                                id: generateId(),
+                                text: labelText,
+                                x: Math.round(x),
+                                y: Math.round(y),
+                                color: tab.defaultLabelColor || "#00FF00",
+                                fontFamily: tab.defaultLabelFontFamily || "Arial",
+                                fontSize: spanState.fontSize || 12,
+                                rotation: rot
+                            };
+                            tab.labels[newLbl.id] = newLbl;
+                            placedIds.push(newLbl.id);
+                        }
+                        
+                        tab.selectedIds = placedIds;
+                        
+                        cancelSpanMode();
+                        renderActiveTabLabels();
+                        updateSelectionStatus();
+                        autosaveSession();
+                        showStatus(`Successfully generated ${labels.length} well labels along boundary for ${spanState.tierName}!`);
+                    }
+                }
+            } else if (e.button === 2) { // Right-click cancels span mode
+                cancelSpanMode();
+            }
+            e.preventDefault();
+            return;
+        }
+        
+        // 2. Standard Interaction (Rubber-band marquee drag selection)
         const clickedOnLabel = e.target.closest(".gel-label-item");
         const clickedOnCanvas = e.target.closest("#canvas-wrapper");
         
         if (!clickedOnLabel && clickedOnCanvas) {
-            const rect = elements.canvasWrapper.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const clickY = e.clientY - rect.top;
-            
-            if (tab.clickMode !== "disabled") {
-                // Placement mode active -> Add label
-                const labelText = (tab.clickMode === "auto-number" || tab.clickMode === "custom") ? tab.nextLabelText : "Label";
-                createNewLabel(tab, labelText, clickX, clickY);
-            } else {
-                // Disabled mode -> Initiate rubber-band drag marquee selection
-                if (!e.shiftKey) {
-                    tab.selectedIds = [];
-                    renderActiveTabLabels();
-                    updateSelectionStatus();
-                }
-                
-                // Start selection box selection
-                selectionBox.active = true;
-                selectionBox.startX = e.clientX - elements.canvasViewport.getBoundingClientRect().left;
-                selectionBox.startY = e.clientY - elements.canvasViewport.getBoundingClientRect().top;
-                
-                selectionBox.domNode = document.createElement("div");
-                selectionBox.domNode.className = "drag-selection-box";
-                selectionBox.domNode.style.left = selectionBox.startX + "px";
-                selectionBox.domNode.style.top = selectionBox.startY + "px";
-                elements.canvasViewport.appendChild(selectionBox.domNode);
-                
-                document.addEventListener("mousemove", handleSelectionBoxMouseMove);
-                document.addEventListener("mouseup", handleSelectionBoxMouseUp);
+            // Clear selections unless shift is held
+            if (!e.shiftKey) {
+                tab.selectedIds = [];
+                renderActiveTabLabels();
+                updateSelectionStatus();
             }
+            
+            // Start selection box marquee
+            selectionBox.active = true;
+            selectionBox.startX = e.clientX - elements.canvasViewport.getBoundingClientRect().left;
+            selectionBox.startY = e.clientY - elements.canvasViewport.getBoundingClientRect().top;
+            
+            selectionBox.domNode = document.createElement("div");
+            selectionBox.domNode.className = "drag-selection-box";
+            selectionBox.domNode.style.left = selectionBox.startX + "px";
+            selectionBox.domNode.style.top = selectionBox.startY + "px";
+            elements.canvasViewport.appendChild(selectionBox.domNode);
+            
+            document.addEventListener("mousemove", handleSelectionBoxMouseMove);
+            document.addEventListener("mouseup", handleSelectionBoxMouseUp);
         }
     });
+
+    // Dynamic Span Preview on Mouse Move
+    if (elements.canvasWrapper) {
+        elements.canvasWrapper.addEventListener("mousemove", (e) => {
+            if (spanState.active && spanState.firstPoint) {
+                const rect = elements.canvasWrapper.getBoundingClientRect();
+                const curX = e.clientX - rect.left;
+                const curY = e.clientY - rect.top;
+                const labels = parseLabelPattern(spanState.pattern);
+                renderSpanPreview(spanState.firstPoint, { x: curX, y: curY }, labels.length);
+            }
+        });
+        
+        // Double-click on empty canvas to create a label
+        elements.canvasWrapper.addEventListener("dblclick", (e) => {
+            if (spanState.active) return;
+            const clickedOnLabel = e.target.closest(".gel-label-item");
+            if (!clickedOnLabel) {
+                const tab = getActiveTab();
+                if (!tab || !tab.imageSrc) return;
+                const rect = elements.canvasWrapper.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                createNewLabel(tab, "Label", clickX, clickY);
+            }
+        });
+        
+        // Context menu on canvas wrapper cancels span mode if active
+        elements.canvasWrapper.addEventListener("contextmenu", (e) => {
+            if (spanState.active) {
+                e.preventDefault();
+                cancelSpanMode();
+            }
+        });
+    }
 
     function handleSelectionBoxMouseMove(e) {
         if (!selectionBox.active) return;
@@ -737,6 +1000,30 @@
     // --- Keyboard Arrow Nudging and Hotkeys ---
 
     window.addEventListener("keydown", (e) => {
+        // 0. Handle Escape key to cancel span mode or deselect
+        if (e.key === "Escape") {
+            if (spanState.active) {
+                cancelSpanMode();
+                e.preventDefault();
+                return;
+            }
+        }
+
+        // Global hotkeys (Ctrl+Z, Ctrl+Y, Ctrl+B)
+        if (e.ctrlKey && e.key.toLowerCase() === "b") {
+            enterSpanMode();
+            e.preventDefault();
+            return;
+        } else if (e.ctrlKey && e.key.toLowerCase() === "z") {
+            triggerUndo();
+            e.preventDefault();
+            return;
+        } else if (e.ctrlKey && e.key.toLowerCase() === "y") {
+            triggerRedo();
+            e.preventDefault();
+            return;
+        }
+        
         const tab = getActiveTab();
         if (!tab || tab.selectedIds.length === 0) return;
         
@@ -1050,8 +1337,6 @@
                 gridYOffset: t.gridYOffset,
                 gridColor: t.gridColor,
                 slideTitle: t.slideTitle,
-                clickMode: t.clickMode,
-                nextLabelText: t.nextLabelText,
                 defaultLabelFontFamily: t.defaultLabelFontFamily,
                 defaultLabelSize: t.defaultLabelSize,
                 defaultLabelColor: t.defaultLabelColor
@@ -1271,28 +1556,46 @@
 
     // --- UI Controls Event Listeners ---
 
-    // Placed Click Mode Select
-    elements.clickModeSelect.addEventListener("change", (e) => {
-        const tab = getActiveTab();
-        if (!tab) return;
-        
-        tab.clickMode = e.target.value;
-        if (tab.clickMode === "custom" || tab.clickMode === "auto-number") {
-            elements.customTextInputWrap.classList.add("visible");
-            tab.nextLabelText = elements.customTextInput.value;
-        } else {
-            elements.customTextInputWrap.classList.remove("visible");
-        }
-        autosaveSession();
-    });
+    // Mark Well Boundaries (Span Mode) Action Listeners
+    if (elements.startSpanBtn) {
+        elements.startSpanBtn.addEventListener("click", () => {
+            enterSpanMode();
+        });
+    }
 
-    elements.customTextInput.addEventListener("input", (e) => {
-        const tab = getActiveTab();
-        if (tab) {
-            tab.nextLabelText = e.target.value;
-            autosaveSession();
-        }
-    });
+    if (elements.cancelSpanBtn) {
+        elements.cancelSpanBtn.addEventListener("click", () => {
+            cancelSpanMode();
+        });
+    }
+
+    if (elements.spanTierSelect) {
+        elements.spanTierSelect.addEventListener("change", (e) => {
+            spanState.tierName = e.target.value;
+            if (spanState.active && elements.spanGuideText) {
+                const ptStep = spanState.firstPoint ? "rightmost well (2nd boundary point)" : "leftmost well (1st boundary point)";
+                elements.spanGuideText.innerHTML = `Span Mode: Click the <strong>${ptStep}</strong> for ${spanState.tierName}`;
+            }
+        });
+    }
+
+    if (elements.spanPatternInput) {
+        elements.spanPatternInput.addEventListener("input", (e) => {
+            spanState.pattern = e.target.value;
+        });
+    }
+
+    if (elements.spanRotationSelect) {
+        elements.spanRotationSelect.addEventListener("change", (e) => {
+            spanState.rotation = parseInt(e.target.value, 10) || 0;
+        });
+    }
+
+    if (elements.spanSizeInput) {
+        elements.spanSizeInput.addEventListener("input", (e) => {
+            spanState.fontSize = parseInt(e.target.value, 10) || 12;
+        });
+    }
 
     // Font selection changes
     elements.fontFamilySelect.addEventListener("change", (e) => {
