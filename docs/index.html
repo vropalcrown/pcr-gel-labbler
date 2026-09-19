@@ -50,6 +50,9 @@
                     <i class="fa-solid fa-folder-open"></i> <span class="btn-text">Open Image</span>
                 </label>
                 <input type="file" id="header-file-input" accept="image/*" class="hidden-file-input">
+                <button id="header-select-all-btn" class="action-btn header-btn" title="Select All Labels (Ctrl+A)">
+                    <i class="fa-solid fa-check-double"></i> <span class="btn-text">Select All</span>
+                </button>
                 <button id="undo-btn" class="action-btn header-btn" title="Undo (Ctrl+Z)" disabled>
                     <i class="fa-solid fa-rotate-left"></i> <span class="btn-text">Undo</span>
                 </button>
@@ -285,6 +288,10 @@
             <main class="canvas-viewport" id="canvas-viewport">
                 <!-- Floating Canvas View Toolbar -->
                 <div class="floating-canvas-toolbar" id="floating-canvas-toolbar">
+                    <button id="floating-select-all-btn" class="icon-btn zoom-btn" title="Select All Labels (Ctrl+A)">
+                        <i class="fa-solid fa-check-double"></i>
+                    </button>
+                    <div style="width: 1px; height: 16px; background: #444; margin: 0 2px;"></div>
                     <button id="zoom-in-btn" class="icon-btn zoom-btn" title="Zoom In (+)">
                         <i class="fa-solid fa-magnifying-glass-plus"></i>
                     </button>

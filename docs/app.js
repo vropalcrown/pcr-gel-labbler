@@ -37,6 +37,9 @@
     const elements = {
         tabBar: document.getElementById("tab-bar"),
         addTabBtn: document.getElementById("add-tab-btn"),
+        headerFileInput: document.getElementById("header-file-input"),
+        headerSelectAllBtn: document.getElementById("header-select-all-btn"),
+        floatingSelectAllBtn: document.getElementById("floating-select-all-btn"),
         undoBtn: document.getElementById("undo-btn"),
         redoBtn: document.getElementById("redo-btn"),
         exportImgBtn: document.getElementById("export-img-btn"),
@@ -1109,39 +1112,72 @@
     // --- Keyboard Arrow Nudging and Hotkeys ---
 
     window.addEventListener("keydown", (e) => {
-        // 0. Handle Escape key to cancel span mode or deselect
-        if (e.key === "Escape") {
+        const isCtrl = e.ctrlKey || e.metaKey;
+        const key = e.key;
+
+        // Ignore hotkeys when typing in text fields / inputs, except Escape
+        const isInputFocused = document.activeElement && (
+            document.activeElement.tagName === "INPUT" ||
+            document.activeElement.tagName === "SELECT" ||
+            document.activeElement.tagName === "TEXTAREA"
+        );
+
+        if (key === "Escape") {
             if (spanState.active) {
                 cancelSpanMode();
                 e.preventDefault();
                 return;
             }
+            if (!isInputFocused) {
+                const tab = getActiveTab();
+                if (tab && tab.selectedIds.length > 0) {
+                    tab.selectedIds = [];
+                    renderActiveTabLabels();
+                    updateSelectionStatus();
+                    showStatus("Deselected all labels.");
+                    e.preventDefault();
+                    return;
+                }
+            }
         }
 
-        // Global hotkeys (Ctrl+Z, Ctrl+Y, Ctrl+B)
-        if (e.ctrlKey && e.key.toLowerCase() === "b") {
+        if (isInputFocused) return;
+
+        // Global hotkeys (Ctrl+A, Ctrl+Shift+A, Ctrl+Z, Ctrl+Y, Ctrl+B)
+        if (isCtrl && key.toLowerCase() === "a") {
+            if (e.shiftKey) {
+                alignEverything();
+            } else {
+                selectAllLabels();
+            }
+            e.preventDefault();
+            return;
+        }
+
+        if (isCtrl && key.toLowerCase() === "b") {
             enterSpanMode();
             e.preventDefault();
             return;
-        } else if (e.ctrlKey && e.key.toLowerCase() === "z") {
-            triggerUndo();
+        }
+
+        if (isCtrl && key.toLowerCase() === "z") {
+            if (e.shiftKey) {
+                triggerRedo();
+            } else {
+                triggerUndo();
+            }
             e.preventDefault();
             return;
-        } else if (e.ctrlKey && e.key.toLowerCase() === "y") {
+        }
+
+        if (isCtrl && key.toLowerCase() === "y") {
             triggerRedo();
             e.preventDefault();
             return;
         }
-        
+
         const tab = getActiveTab();
         if (!tab || tab.selectedIds.length === 0) return;
-        
-        // Disable nudging/deletes if user is typing in inputs or forms
-        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT") {
-            return;
-        }
-        
-        const key = e.key;
         
         // 1. Delete label
         if (key === "Delete" || key === "Backspace") {
@@ -1196,14 +1232,6 @@
         } else if (key === "ArrowDown") {
             dy = step;
         } else {
-            // Check for Ctrl+Z undo hotkeys
-            if (e.ctrlKey && key.toLowerCase() === "z") {
-                triggerUndo();
-                e.preventDefault();
-            } else if (e.ctrlKey && key.toLowerCase() === "y") {
-                triggerRedo();
-                e.preventDefault();
-            }
             return;
         }
         
@@ -1934,6 +1962,8 @@
     if (elements.distHorizBtn) elements.distHorizBtn.addEventListener("click", () => alignLabels("DistributeHorizontally"));
     if (elements.distVertBtn) elements.distVertBtn.addEventListener("click", () => alignLabels("DistributeVertically"));
     if (elements.selectAllBtn) elements.selectAllBtn.addEventListener("click", selectAllLabels);
+    if (elements.headerSelectAllBtn) elements.headerSelectAllBtn.addEventListener("click", selectAllLabels);
+    if (elements.floatingSelectAllBtn) elements.floatingSelectAllBtn.addEventListener("click", selectAllLabels);
     if (elements.alignEverythingBtn) elements.alignEverythingBtn.addEventListener("click", alignEverything);
 
     // Zoom & Canvas View Controls
