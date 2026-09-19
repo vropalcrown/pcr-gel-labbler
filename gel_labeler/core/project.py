@@ -3,6 +3,7 @@ import csv
 import os
 import re
 import time
+import math
 import logging
 from typing import Dict, List, Optional
 import cv2
@@ -194,13 +195,17 @@ class GelProject:
             self.labels.clear()
             self.is_dirty = True
 
+    def get_labels_reading_order(self) -> List[GelLabel]:
+        """Returns labels sorted in natural reading order (top-to-bottom tier, left-to-right lane)."""
+        return sorted(self.labels.values(), key=lambda l: (round(l.y / 20.0), l.x))
+
     def to_dict(self) -> dict:
         """Serializes the project configuration."""
         return {
             "image_path": self.image_path,
             "image_width": self.image_width,
             "image_height": self.image_height,
-            "labels": [label.to_dict() for label in self.labels.values()]
+            "labels": [label.to_dict() for label in self.get_labels_reading_order()]
         }
 
     def save_to_json(self, file_path: str):
@@ -256,13 +261,13 @@ class GelProject:
         return s
 
     def export_to_csv(self, file_path: str):
-        """Exports the labels database to a CSV file with DDE formula injection neutralization."""
+        """Exports the labels database to a CSV file in reading order with DDE formula injection neutralization."""
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # Write Header
             writer.writerow(["label_id", "text", "pixel_x", "pixel_y", "color", "font_size", "font_family"])
-            # Write label rows
-            for label in self.labels.values():
+            # Write label rows in natural reading order
+            for label in self.get_labels_reading_order():
                 writer.writerow([
                     self.sanitize_csv_cell(label.id),
                     self.sanitize_csv_cell(label.text),
@@ -325,13 +330,22 @@ class GelProject:
         self.save_undo_state()
         self._in_batch_operation = True
         try:
-            # Filter out old labels close to this line segment region to prevent overlap
-            y_min, y_max = min(y1, y2) - 40, max(y1, y2) + 40
-            x_min, x_max = min(x1, x2) - 40, max(x1, x2) + 40
+            dx = x2 - x1
+            dy = y2 - y1
+            seg_len_sq = dx * dx + dy * dy
             
+            def dist_to_segment(px: float, py: float) -> float:
+                if seg_len_sq <= 0:
+                    return math.hypot(px - x1, py - y1)
+                t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / seg_len_sq))
+                proj_x = x1 + t * dx
+                proj_y = y1 + t * dy
+                return math.hypot(px - proj_x, py - proj_y)
+
+            # Filter out old labels within 30px perpendicular distance to prevent overlap
             self.labels = {
                 lid: lbl for lid, lbl in self.labels.items()
-                if not (x_min <= lbl.x <= x_max and y_min <= lbl.y <= y_max)
+                if dist_to_segment(lbl.x, lbl.y) > 30.0
             }
             
             n_labels = len(labels)
@@ -520,10 +534,18 @@ class GelProject:
                 
             slide = prs.slides.add_slide(blank_slide_layout)
             
+            # Dynamically derive slide dimensions from presentation (supports 16:9, 4:3, or custom decks)
+            try:
+                slide_w_in = float(prs.slide_width.inches)
+                slide_h_in = float(prs.slide_height.inches)
+            except Exception:
+                slide_w_in = float(prs.slide_width) / 914400.0
+                slide_h_in = float(prs.slide_height) / 914400.0
+
             # If slide title is specified and not empty, add a centered title textbox at the top of the slide
             has_title = bool(slide_title and slide_title.strip())
             if has_title:
-                title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(12.33), Inches(0.8))
+                title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(max(1.0, slide_w_in - 1.0)), Inches(0.8))
                 tf_title = title_box.text_frame
                 tf_title.word_wrap = True
                 tf_title.margin_left = Inches(0)
@@ -541,10 +563,10 @@ class GelProject:
             
             # If no image is loaded or path does not exist, show an empty title placeholder on slide
             if not project.image_path or not os.path.exists(project.image_path):
-                box_w_in = 6.0
+                box_w_in = min(6.0, max(2.0, slide_w_in - 2.0))
                 box_h_in = 1.0
                 tx_shape = slide.shapes.add_textbox(
-                    Inches(3.66), Inches(3.25), Inches(box_w_in), Inches(box_h_in)
+                    Inches((slide_w_in - box_w_in) / 2.0), Inches((slide_h_in - box_h_in) / 2.0), Inches(box_w_in), Inches(box_h_in)
                 )
                 tf = tx_shape.text_frame
                 p = tf.paragraphs[0]
@@ -561,16 +583,12 @@ class GelProject:
             if img_w_px <= 0 or img_h_px <= 0:
                 continue
                 
-            # Calculate fit layout to center the gel image on the 13.33" x 7.5" slide
-            slide_w_in = 13.33
-            slide_h_in = 7.5
-            
+            # Calculate fit layout to center the gel image on the slide
             if has_title:
-                # Reserve top 1.3" for title. Available height for gel image is 5.7" (with 0.5" bottom margin)
-                avail_h_in = 5.7
+                avail_h_in = max(1.0, slide_h_in - 1.8)
                 top_offset_in = 1.3
             else:
-                avail_h_in = 7.5
+                avail_h_in = slide_h_in
                 top_offset_in = 0.0
                 
             scale = min(slide_w_in / img_w_px, avail_h_in / img_h_px)

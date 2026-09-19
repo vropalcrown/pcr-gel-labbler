@@ -362,7 +362,7 @@ class MainWindow(QMainWindow):
         # Clipboard for copying and pasting labels across tabs
         self.clipboard_labels = []
         
-        self.setWindowTitle("Gel Electrophoresis Image Labeler - MVP")
+        self.setWindowTitle("Gel Labeler")
         self.resize(1024, 768)
         
         # Set window icon

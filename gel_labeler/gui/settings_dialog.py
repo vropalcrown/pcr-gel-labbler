@@ -17,7 +17,11 @@ class SettingsDialog(QDialog):
         self.resize(320, 340)  # Expanded height slightly to fit rotation input
         
         self.selected_color = initial_color
-        self.selected_font_size = initial_font_size
+        try:
+            sz = int(round(float(initial_font_size)))
+        except (ValueError, TypeError):
+            sz = DEFAULT_FONT_SIZE
+        self.selected_font_size = max(8, min(72, sz))
         self.selected_rotation = initial_rotation
         self.color_buttons = []
         
@@ -184,6 +188,6 @@ class SettingsDialog(QDialog):
         return (
             self.text_input.text().strip(), 
             self.selected_color, 
-            self.selected_font_size, 
+            self.size_spin.value(), 
             self.get_selected_rotation()
         )

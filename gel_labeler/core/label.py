@@ -38,7 +38,7 @@ class GelLabel:
         except (ValueError, TypeError):
             rot = 0.0
             
-        self.rotation = 270.0 if "ladder" in self.text.lower() else rot
+        self.rotation = rot
 
     def to_dict(self) -> dict:
         """Serializes the label data into a dictionary for JSON/CSV exports."""
@@ -81,8 +81,6 @@ class GelLabel:
         """Updates style or content attributes of the label."""
         if text is not None:
             self.text = str(text)
-            if "ladder" in self.text.lower():
-                self.rotation = 270.0
         if color is not None:
             color_str = str(color).strip()
             if HEX_COLOR_REGEX.match(color_str):
@@ -93,7 +91,7 @@ class GelLabel:
                 self.font_size = max(4, min(144, sz))
             except (ValueError, TypeError):
                 pass
-        if rotation is not None and (text is None or "ladder" not in self.text.lower()):
+        if rotation is not None:
             try:
                 self.rotation = float(rotation) % 360.0
             except (ValueError, TypeError):

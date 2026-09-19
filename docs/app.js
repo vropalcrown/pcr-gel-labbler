@@ -187,12 +187,17 @@
     }
 
     // --- Lane Pattern Parser (Supports ranges like 1-29, S111-S119, literal names, commas) ---
+    const MAX_RANGE_SPAN = 500;
+    const MAX_TOTAL_LABELS = 1000;
+
     function parseLabelPattern(pattern) {
         if (!pattern || !pattern.trim()) return [];
         const parts = pattern.split(",").map(p => p.trim()).filter(Boolean);
         const labels = [];
         
         for (const part of parts) {
+            if (labels.length >= MAX_TOTAL_LABELS) break;
+
             if (part.includes("-")) {
                 const subparts = part.split("-");
                 if (subparts.length === 2) {
@@ -202,10 +207,16 @@
                     // Case 1: Simple numeric range (e.g. 1-26 or 26-1)
                     if (/^\d+$/.test(startStr) && /^\d+$/.test(endStr)) {
                         const start = parseInt(startStr, 10);
-                        const end = parseInt(endStr, 10);
+                        let end = parseInt(endStr, 10);
+                        
+                        if (Math.abs(end - start) + 1 > MAX_RANGE_SPAN) {
+                            end = start <= end ? start + MAX_RANGE_SPAN - 1 : start - MAX_RANGE_SPAN + 1;
+                        }
+
                         const step = start <= end ? 1 : -1;
                         for (let n = start; step > 0 ? n <= end : n >= end; n += step) {
                             labels.push(n.toString());
+                            if (labels.length >= MAX_TOTAL_LABELS) break;
                         }
                         continue;
                     }
@@ -216,13 +227,19 @@
                     if (mStart && mEnd && mStart[1] === mEnd[1]) {
                         const prefix = mStart[1];
                         const startVal = parseInt(mStart[2], 10);
-                        const endVal = parseInt(mEnd[2], 10);
+                        let endVal = parseInt(mEnd[2], 10);
+                        
+                        if (Math.abs(endVal - startVal) + 1 > MAX_RANGE_SPAN) {
+                            endVal = startVal <= endVal ? startVal + MAX_RANGE_SPAN - 1 : startVal - MAX_RANGE_SPAN + 1;
+                        }
+
                         const padLen = (startStr.startsWith(prefix + "0") || endStr.startsWith(prefix + "0"))
                             ? Math.max(mStart[2].length, mEnd[2].length) : 0;
                         const step = startVal <= endVal ? 1 : -1;
                         for (let val = startVal; step > 0 ? val <= endVal : val >= endVal; val += step) {
                             const numStr = padLen > 0 ? val.toString().padStart(padLen, "0") : val.toString();
                             labels.push(`${prefix}${numStr}`);
+                            if (labels.length >= MAX_TOTAL_LABELS) break;
                         }
                         continue;
                     }
@@ -230,7 +247,7 @@
             }
             labels.push(part);
         }
-        return labels;
+        return labels.slice(0, MAX_TOTAL_LABELS);
     }
 
     // --- Mark Well Boundaries (Span Placement) State & Engine ---
@@ -899,15 +916,22 @@
                         
                         saveUndoState(tab);
                         
-                        // Clear existing labels in span corridor to prevent overlap (matches desktop behavior)
-                        const yMin = Math.min(pt1.y, pt2.y) - 30;
-                        const yMax = Math.max(pt1.y, pt2.y) + 30;
-                        const xMin = Math.min(pt1.x, pt2.x) - 30;
-                        const xMax = Math.max(pt1.x, pt2.x) + 30;
+                        // Clear existing labels in span corridor to prevent overlap
+                        const dx = pt2.x - pt1.x;
+                        const dy = pt2.y - pt1.y;
+                        const segLenSq = dx * dx + dy * dy;
+                        
+                        function distToSegment(px, py) {
+                            if (segLenSq === 0) return Math.hypot(px - pt1.x, py - pt1.y);
+                            const t = Math.max(0, Math.min(1, ((px - pt1.x) * dx + (py - pt1.y) * dy) / segLenSq));
+                            const projX = pt1.x + t * dx;
+                            const projY = pt1.y + t * dy;
+                            return Math.hypot(px - projX, py - projY);
+                        }
                         
                         Object.keys(tab.labels).forEach(lid => {
                             const lbl = tab.labels[lid];
-                            if (lbl.x >= xMin && lbl.x <= xMax && lbl.y >= yMin && lbl.y <= yMax) {
+                            if (distToSegment(lbl.x, lbl.y) <= 30) {
                                 delete tab.labels[lid];
                             }
                         });
@@ -1398,11 +1422,6 @@
         currentEditingLabel.fontSize = parseInt(elements.editLabelSize.value, 10) || 12;
         currentEditingLabel.color = elements.editLabelColor.value;
         currentEditingLabel.rotation = parseInt(elements.editLabelRotation.value, 10) || 0;
-        
-        // Special constraint matching: force Ladder rotation if rename contains ladder
-        if (currentEditingLabel.text.toLowerCase().includes("ladder")) {
-            currentEditingLabel.rotation = 270;
-        }
         
         closeEditLabelModal();
         renderActiveTabLabels();

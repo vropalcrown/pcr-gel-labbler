@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsEllipseItem, QGraphicsTextItem, QFormLayout, QGroupBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QColor, QFont
 
 
@@ -44,6 +44,7 @@ class ColonyCanvas(QGraphicsView):
     def set_image(self, pixmap: QPixmap):
         self.scene.clear()
         self.marker_items.clear()
+        self.dish_ring_item = None
         self.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
         self.bg_pixmap_item = QGraphicsPixmapItem(pixmap)
@@ -169,6 +170,11 @@ class ColonyCounterDialog(QDialog):
         self.image_path: Optional[str] = None
         self.raw_cv_image: Optional[np.ndarray] = None
         self.last_dish_circle: Optional[tuple] = None
+
+        self._detect_timer = QTimer(self)
+        self._detect_timer.setSingleShot(True)
+        self._detect_timer.setInterval(80)
+        self._detect_timer.timeout.connect(self._run_live_detection)
 
         self.init_ui()
         self.apply_dark_theme()
@@ -471,6 +477,12 @@ class ColonyCounterDialog(QDialog):
         self.canvas.render_markers(self.canvas.colonies, self.last_dish_circle)
 
     def trigger_live_detection(self):
+        """Triggers live detection with debouncing to keep the GUI responsive during slider movements."""
+        if self.raw_cv_image is None:
+            return
+        self._detect_timer.start(80)
+
+    def _run_live_detection(self):
         if self.raw_cv_image is None:
             return
 
