@@ -15,8 +15,9 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo Installing PyQt6, OpenCV, Pillow, and Python-PPTX...
-pip install -r requirements.txt
+echo Installing PyQt6, OpenCV, Pillow, Python-PPTX, NumPy, and PyFlakes...
+python -m pip install -r requirements.txt
+
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ========================================================

@@ -1,12 +1,16 @@
 import os
 import json
+import logging
+import tempfile
 from typing import Optional
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                             QFileDialog, QMessageBox, QLabel, QSplitter,
+                             QFileDialog, QMessageBox, QLabel,
                              QTabWidget, QDialog, QListWidget, QListWidgetItem,
                              QPushButton, QCheckBox, QLineEdit)
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import Qt, QTimer, QSize, QStandardPaths
 from PyQt6.QtGui import QAction, QImage, QPainter, QIcon
+
+logger = logging.getLogger("gel_labeler")
 
 from gel_labeler.config import DARK_THEME_QSS, DEFAULT_COLOR
 from gel_labeler.core.project import GelProject
@@ -917,8 +921,16 @@ class MainWindow(QMainWindow):
             self.show_status_message(f"Tab renamed to: {new_text.strip()}")
 
     def autosave_path(self) -> str:
-        """Returns the path of the hidden session recovery file."""
-        return os.path.join(r"C:\Users\DEVANANDAN K C\.gemini\antigravity\scratch\gel_labeler", ".autosave_session.json")
+        """Returns the path of the hidden session recovery file in user AppData."""
+        app_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+        if not app_dir:
+            app_dir = os.path.join(tempfile.gettempdir(), "GelLabeler")
+        try:
+            os.makedirs(app_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Could not create app data directory {app_dir}: {e}")
+            app_dir = tempfile.gettempdir()
+        return os.path.join(app_dir, ".autosave_session.json")
 
     def serialize_session(self) -> Optional[dict]:
         """Serializes all open tabs, images, dimensions, and labels into a dictionary."""
@@ -945,6 +957,7 @@ class MainWindow(QMainWindow):
 
     def trigger_autosave(self):
         """Saves the active session atomically to disk."""
+        temp_path = None
         try:
             session_data = self.serialize_session()
             if not session_data:
@@ -956,22 +969,32 @@ class MainWindow(QMainWindow):
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(session_data, f, indent=4)
                 
-            if os.path.exists(path):
-                os.remove(path)
-            os.rename(temp_path, path)
+            os.replace(temp_path, path)
+            logger.debug(f"Autosave completed successfully to {path}")
         except Exception as e:
-            print(f"Error during auto-save: {e}")
+            logger.error(f"Error during auto-save: {e}", exc_info=True)
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
 
     def check_and_recover_session(self):
         """Checks for an auto-save file and prompts the user to restore the session."""
         path = self.autosave_path()
+        # Fallback to legacy scratch path or working directory if not found in AppData
         if not os.path.exists(path):
-            return
+            legacy_path = os.path.join(os.getcwd(), ".autosave_session.json")
+            if os.path.exists(legacy_path):
+                path = legacy_path
+            else:
+                return
             
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to read autosave session file: {e}")
             return
             
         if not session_data or "tabs" not in session_data or not session_data["tabs"]:
@@ -988,8 +1011,8 @@ class MainWindow(QMainWindow):
             # Delete file if user declines so they are not prompted again
             try:
                 os.remove(path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Could not remove discarded autosave file: {e}")
             return
             
         self.tab_widget.clear()
@@ -998,7 +1021,6 @@ class MainWindow(QMainWindow):
         
         for tab_data in session_data["tabs"]:
             raw_name = tab_data.get("name", "Gel")
-            clean_name = raw_name.replace("📁 ", "")
             
             tab = GelTabWidget(self)
             
@@ -1042,7 +1064,7 @@ class MainWindow(QMainWindow):
         self.update_window_title()
 
     def closeEvent(self, event):
-        """Clean shutdown handler checking for unsaved changes and removing recovery file."""
+        """Clean shutdown handler checking for unsaved changes and removing recovery file only when clean."""
         all_clean = True
         for idx in range(self.tab_widget.count()):
             tab = self.tab_widget.widget(idx)
@@ -1060,14 +1082,16 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-                
-        # Clean close: delete autosave backup
-        try:
-            path = self.autosave_path()
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+            # Preserve unsaved session by capturing a snapshot before exit
+            self.trigger_autosave()
+        else:
+            # Clean close: delete autosave backup
+            try:
+                path = self.autosave_path()
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as e:
+                logger.warning(f"Could not remove autosave file on clean exit: {e}")
         event.accept()
 
     def close_tab(self, index: int):
@@ -1153,6 +1177,15 @@ class MainWindow(QMainWindow):
             # we create a new tab.
             if not tab or tab.project.image_path or idx > 0:
                 tab = self.add_new_tab(os.path.basename(file_path))
+            elif tab and tab.project.is_dirty:
+                reply = QMessageBox.question(
+                    self, "Unsaved Changes",
+                    f"The current tab has unsaved changes. Overwrite with '{os.path.basename(file_path)}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    tab = self.add_new_tab(os.path.basename(file_path))
                 
             reader = QImage(file_path)
             if reader.isNull():
@@ -1197,6 +1230,19 @@ class MainWindow(QMainWindow):
         # Sort alphabetically so they open in order
         img_files.sort(key=lambda x: os.path.basename(x).lower())
         
+        # Cap batch folder loading at 100 images to prevent memory exhaustion
+        max_batch = 100
+        if len(img_files) > max_batch:
+            reply = QMessageBox.question(
+                self, "Large Batch Warning",
+                f"Found {len(img_files)} images in folder. Loading all of them may consume high memory. Limit to first {max_batch} images?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                img_files = img_files[:max_batch]
+
+        from PyQt6.QtWidgets import QApplication
         for idx, file_path in enumerate(img_files):
             tab = self.active_tab
             
@@ -1216,9 +1262,12 @@ class MainWindow(QMainWindow):
                 self.tab_widget.setTabText(t_idx, f"📁 {os.path.basename(file_path)}")
                 
             tab.canvas.load_project_image()
+            if idx % 10 == 0:
+                QApplication.processEvents()
             
         self.show_status_message(f"Successfully loaded {len(img_files)} gel image(s) from folder.")
         self.update_window_title()
+
 
     def open_grid_dialog(self):
         """Spawns the modeless GridOverlayDialog to configure reference grid lines."""
@@ -1231,7 +1280,6 @@ class MainWindow(QMainWindow):
             self._grid_overlay_dialog.activateWindow()
             return
             
-        from gel_labeler.gui.grid_dialog import GridOverlayDialog
         self._grid_overlay_dialog = GridOverlayDialog(self)
         self._grid_overlay_dialog.finished.connect(self.handle_grid_dialog_closed)
         self._grid_overlay_dialog.show()
@@ -1251,7 +1299,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Image", "Please load a gel image before defining boundaries.")
             return
             
-        from PyQt6.QtWidgets import QDialog, QComboBox, QSpinBox, QCheckBox, QPushButton, QFormLayout, QLineEdit
+        from PyQt6.QtWidgets import QDialog, QComboBox, QSpinBox, QPushButton, QFormLayout, QLineEdit
         
         class SpanConfigDialog(QDialog):
             def __init__(self, parent=None):
@@ -1443,6 +1491,13 @@ class MainWindow(QMainWindow):
             scene_rect = self.canvas.scene.sceneRect()
             output_image = QImage(scene_rect.size().toSize(), QImage.Format.Format_ARGB32)
             
+            # Fill background appropriately
+            is_jpeg = file_path.lower().endswith(('.jpg', '.jpeg'))
+            if is_jpeg:
+                output_image.fill(Qt.GlobalColor.white)
+            else:
+                output_image.fill(Qt.GlobalColor.transparent)
+            
             # Use QPainter to draw the scene directly onto the image
             painter = QPainter(output_image)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1451,12 +1506,16 @@ class MainWindow(QMainWindow):
             self.canvas.scene.render(painter)
             painter.end()
             
+            if is_jpeg:
+                output_image = output_image.convertToFormat(QImage.Format.Format_RGB32)
+            
             # Save final image
             success = output_image.save(file_path)
             if success:
                 self.show_status_message(f"Image successfully exported to: {os.path.basename(file_path)}")
             else:
                 QMessageBox.critical(self, "Export Error", "Failed to save the exported image.")
+
 
     def save_json_dialog(self):
         """Saves the label coordinates and properties database as JSON."""
@@ -1600,11 +1659,12 @@ class MainWindow(QMainWindow):
             
             project.labels[new_label.id] = new_label
             new_ids.append(new_label.id)
+            active_tab.canvas.create_label_item(new_label)
             pasted_count += 1
             
         if pasted_count > 0:
             project.is_dirty = True
-            active_tab.canvas.populate_labels()
+            self.update_window_title()
             
             # Select the newly pasted labels so user can move them immediately
             for lid in new_ids:
@@ -1612,6 +1672,7 @@ class MainWindow(QMainWindow):
                     active_tab.canvas.label_items[lid].setSelected(True)
                     
             self.show_status_message(f"Pasted {pasted_count} label(s) onto the current tab.")
+
 
     def clear_labels_confirm(self):
         """Prompts user to confirm clearing all active labels."""
@@ -1709,6 +1770,14 @@ class MainWindow(QMainWindow):
 
     def increment_next_label(self, current_text: str):
         """Increments the next label text box counter."""
+        if not current_text:
+            self.next_edit.setText("1")
+            return
+        trimmed = current_text.strip()
+        if trimmed.lower() in ("ladder", "nc", "pc", "blank", "ctrl", "control", "water", "ntc", "marker"):
+            self.next_edit.setText(current_text)
+            return
+
         import re
         match = re.search(r"(\d+)$", current_text)
         if match:
@@ -1816,15 +1885,16 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self):
         """Displays application details."""
         QMessageBox.about(
-            self, "About Gel Electrophoresis Image Labeler",
-            "<h3>Gel Electrophoresis Image Labeler (MVP)</h3>"
-            "<p>A professional utility for annotating molecular gel wells.</p>"
+            self, "About Gel Labeler",
+            "<h3>Gel Labeler — Gel Electrophoresis Suite</h3>"
+            "<p>A professional utility for annotating molecular gel wells and counting bacterial colonies.</p>"
             "<p><b>Features:</b></p>"
             "<ul>"
-            "  <li>Precise pixel-locked coordinates</li>"
+            "  <li>Precise pixel-locked coordinates & alignment tools</li>"
             "  <li>Draggable & style-adjustable text items</li>"
             "  <li>Subtle high-contrast text glow/drop shadows</li>"
-            "  <li>JSON Database and CSV Spreadsheet export</li>"
+            "  <li>AI Vision Colony & Seed Counter with CFU estimation</li>"
+            "  <li>JSON Database, CSV Spreadsheet, and PowerPoint (PPTX) export</li>"
             "  <li>High-resolution pixel-perfect image export</li>"
             "</ul>"
             "<p>Author: Devanandan K C</p>"
@@ -1850,7 +1920,7 @@ class MainWindow(QMainWindow):
 
     def update_window_title(self):
         """Updates window title showing file name and modification state."""
-        title = "Gel Electrophoresis Image Labeler"
+        title = "Gel Labeler"
         if self.project.image_path:
             filename = os.path.basename(self.project.image_path)
             dirty_star = "*" if self.project.is_dirty else ""
@@ -1863,6 +1933,11 @@ class MainWindow(QMainWindow):
 
     def update_selection_status(self):
         """Updates coordination readouts if any items are active."""
+        if not self.active_tab or not self.canvas or not self.canvas.scene:
+            if hasattr(self, 'coord_label'):
+                self.coord_label.setText("")
+            return
+            
         selected_items = self.canvas.scene.selectedItems()
         if selected_items:
             item = selected_items[0]
@@ -1870,7 +1945,7 @@ class MainWindow(QMainWindow):
             self.coord_label.setText(f"Selected: '{item.toPlainText()}' at pixel: ({int(pos.x())}, {int(pos.y())})")
             
             # Real-time profile graph update on selection
-            if hasattr(self, 'profile_panel') and hasattr(item, 'label_data'):
+            if hasattr(self, 'profile_panel') and hasattr(item, 'label_data') and self.profile_panel:
                 self.profile_panel.set_selected_label(item.label_data)
             
             # Update toolbar controls to match selected item style
@@ -1886,24 +1961,24 @@ class MainWindow(QMainWindow):
                 self.font_size_spin.blockSignals(False)
         else:
             self.coord_label.setText("")
-            if hasattr(self, 'profile_panel'):
+            if hasattr(self, 'profile_panel') and self.profile_panel:
                 self.profile_panel.set_selected_label(None)
 
     def on_selected_label_dragged(self, label_id: str, new_x: float, new_y: float):
         """Triggered in real time when a selected label is dragged."""
-        if hasattr(self, 'profile_panel'):
+        if hasattr(self, 'profile_panel') and self.profile_panel:
             self.profile_panel.update_drag_position(label_id, new_x, new_y)
 
     def toggle_profile_panel(self):
         """Toggles the visibility of the lane profile panel."""
-        if hasattr(self, 'profile_panel'):
+        if hasattr(self, 'profile_panel') and self.profile_panel:
             visible = not self.profile_panel.isVisible()
             self.profile_panel.setVisible(visible)
             self.sync_profile_button_state()
 
     def sync_profile_button_state(self):
         """Syncs the toolbar/menu action state with the panel visibility."""
-        if hasattr(self, 'profile_panel'):
+        if hasattr(self, 'profile_panel') and self.profile_panel:
             if hasattr(self, 'profile_toggle_act'):
                 self.profile_toggle_act.blockSignals(True)
                 self.profile_toggle_act.setChecked(self.profile_panel.isVisible())
@@ -1912,3 +1987,4 @@ class MainWindow(QMainWindow):
                 self.profile_toolbar_btn.blockSignals(True)
                 self.profile_toolbar_btn.setChecked(self.profile_panel.isVisible())
                 self.profile_toolbar_btn.blockSignals(False)
+

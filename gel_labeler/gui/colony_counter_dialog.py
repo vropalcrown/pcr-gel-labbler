@@ -7,11 +7,12 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QSlider, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QFileDialog, 
-    QMessageBox, QSplitter, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QGraphicsEllipseItem, QGraphicsTextItem, QFormLayout, QGroupBox, QFrame
+    QMessageBox, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
+    QGraphicsEllipseItem, QGraphicsTextItem, QFormLayout, QGroupBox
 )
-from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QBrush, QColor, QFont, QCursor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QColor, QFont
+
 
 from gel_labeler.core.colony_detector import ColonyDetector, ColonyObject
 
@@ -473,6 +474,8 @@ class ColonyCounterDialog(QDialog):
         if self.raw_cv_image is None:
             return
 
+        manual_colonies = [c for c in self.canvas.colonies if c.is_manual]
+
         colonies, dish_circle = ColonyDetector.detect_colonies(
             image=self.raw_cv_image,
             min_radius=self.min_rad_spin.value(),
@@ -484,12 +487,20 @@ class ColonyCounterDialog(QDialog):
             use_watershed=self.watershed_chk.isChecked()
         )
 
+        # Retain manual markers and renumber
+        next_id = len(colonies) + 1
+        for mc in manual_colonies:
+            mc.id = next_id
+            colonies.append(mc)
+            next_id += 1
+
         self.last_dish_circle = dish_circle
         self.canvas.marker_color = self.get_color_hex_from_combo()
         self.canvas.marker_size = self.marker_size_spin.value()
         self.canvas.show_numbers = self.show_numbers_chk.isChecked()
         self.canvas.render_markers(colonies, dish_circle)
         self.update_statistics()
+
 
     def get_current_dilution_factor(self) -> float:
         idx = self.dilution_combo.currentIndex()
@@ -546,10 +557,18 @@ class ColonyCounterDialog(QDialog):
         dilution = self.get_current_dilution_factor()
         cfu_total = ColonyDetector.calculate_cfu(len(self.canvas.colonies), vol, dilution)
 
+        def sanitize_cell(val):
+            if val is None:
+                return ""
+            s = str(val)
+            if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+                return f"'{s}"
+            return s
+
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(["# Colony & Seed AI Vision Report"])
-            writer.writerow(["Source Image", self.image_path or "Unknown"])
+            writer.writerow(["Source Image", sanitize_cell(self.image_path or "Unknown")])
             writer.writerow(["Total Count", len(self.canvas.colonies)])
             writer.writerow(["Plated Volume (mL)", vol])
             writer.writerow(["Dilution Factor", dilution])
@@ -558,6 +577,13 @@ class ColonyCounterDialog(QDialog):
             writer.writerow(["Colony ID", "X (px)", "Y (px)", "Radius (px)", "Area (px^2)", "Type"])
 
             for c in self.canvas.colonies:
-                writer.writerow([c.id, c.x, c.y, c.radius, c.area, "Manual" if c.is_manual else "AI Detected"])
+                writer.writerow([
+                    sanitize_cell(c.id),
+                    c.x,
+                    c.y,
+                    c.radius,
+                    c.area,
+                    sanitize_cell("Manual" if c.is_manual else "AI Detected")
+                ])
 
         QMessageBox.information(self, "Export Successful", f"Colony data exported to:\n{file_path}")

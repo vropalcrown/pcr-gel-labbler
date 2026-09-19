@@ -1,12 +1,15 @@
 import os
 import csv
+import logging
 import numpy as np
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFileDialog, QMessageBox)
-from PyQt6.QtCore import Qt, QPointF, QRectF
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QLinearGradient, QPainterPath, QFont
 from gel_labeler.core.project import GelProject
 from gel_labeler.core.label import GelLabel
+
+logger = logging.getLogger("gel_labeler")
 
 class ProfileGraphWidget(QWidget):
     """Custom widget to draw the vertical lane pixel intensity profile."""
@@ -37,6 +40,12 @@ class ProfileGraphWidget(QWidget):
         self.update()
 
     def paintEvent(self, event):
+        try:
+            self._do_paint(event)
+        except Exception as e:
+            logger.error(f"Error in ProfileGraphWidget paintEvent: {e}", exc_info=True)
+
+    def _do_paint(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -107,9 +116,11 @@ class ProfileGraphWidget(QWidget):
         def map_coords(intensity, idx):
             # Intensity goes 0..255 -> plot_w
             # Index goes 0..n_points-1 -> plot_h
+            denom = max(1.0, float(n_points - 1))
             px = margin_left + (intensity / 255.0) * plot_w
-            py = margin_top + (idx / float(n_points - 1)) * plot_h
+            py = margin_top + (idx / denom) * plot_h
             return px, py
+
             
         # Build path and gradient area
         x0, y0 = map_coords(self.profile_data[0], 0)
@@ -337,14 +348,24 @@ class LaneProfilePanel(QWidget):
         if self.profile is None or not self.selected_label:
             return
             
+        import re
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', self.selected_label.text)
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export Lane Profile (CSV)", 
-            f"profile_{self.selected_label.text.replace(' ', '_')}.csv",
+            f"profile_{safe_name}.csv",
             "CSV Files (*.csv)"
         )
         
         if file_path:
             try:
+                def sanitize_cell(val):
+                    if val is None:
+                        return ""
+                    s = str(val)
+                    if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+                        return f"'{s}"
+                    return s
+
                 with open(file_path, "w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
                     writer.writerow(["Y_pixel", "Intensity"])
@@ -358,9 +379,11 @@ class LaneProfilePanel(QWidget):
         if self.profile is None or not self.selected_label:
             return
             
+        import re
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', self.selected_label.text)
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export Profile Graph (PNG)", 
-            f"profile_{self.selected_label.text.replace(' ', '_')}.png",
+            f"profile_{safe_name}.png",
             "PNG Files (*.png);;All Files (*)"
         )
         
@@ -373,3 +396,4 @@ class LaneProfilePanel(QWidget):
                     QMessageBox.critical(self, "Export Error", "Failed to render or save image file.")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export graph: {e}")
+

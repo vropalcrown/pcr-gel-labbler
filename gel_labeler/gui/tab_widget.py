@@ -1,6 +1,6 @@
-import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter
 from PyQt6.QtCore import Qt
+
 from gel_labeler.core.project import GelProject
 from gel_labeler.gui.canvas import GelCanvas
 from gel_labeler.gui.profile_panel import LaneProfilePanel

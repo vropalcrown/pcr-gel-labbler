@@ -1,7 +1,8 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QLineEdit, QPushButton, QSlider, QSpinBox, 
-                               QCheckBox, QWidget, QGridLayout, QComboBox, QFormLayout)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
+                             QPushButton, QSlider, QSpinBox, 
+                             QCheckBox, QWidget, QComboBox, QFormLayout)
 from PyQt6.QtCore import Qt
+
 
 class GridOverlayDialog(QDialog):
     """Modeless dialog to configure and toggle a real-time visual reference grid overlay on the gel image."""

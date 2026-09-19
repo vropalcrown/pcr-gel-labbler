@@ -1,5 +1,4 @@
 import os
-import sys
 import subprocess
 
 def create_desktop_shortcut():
@@ -8,11 +7,16 @@ def create_desktop_shortcut():
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     shortcut_path = os.path.join(desktop, "Gel Labeler.lnk")
     
+    # Escape quotes for VBScript
+    vbs_target = target_bat.replace('"', '""')
+    vbs_workdir = script_dir.replace('"', '""')
+    vbs_shortcut = shortcut_path.replace('"', '""')
+    
     vbs_content = f'''Set oWS = WScript.CreateObject("WScript.Shell")
-sLinkFile = "{shortcut_path}"
+sLinkFile = "{vbs_shortcut}"
 Set oLink = oWS.CreateShortcut(sLinkFile)
-oLink.TargetPath = "{target_bat}"
-oLink.WorkingDirectory = "{script_dir}"
+oLink.TargetPath = "{vbs_target}"
+oLink.WorkingDirectory = "{vbs_workdir}"
 oLink.Description = "Gel Labeler - PCR Gel Genie & AI Colony Counter"
 oLink.Save
 '''
@@ -23,13 +27,14 @@ oLink.Save
         
     try:
         subprocess.run(["cscript", "//nologo", temp_vbs], check=True)
-        print(f"\n=======================================================")
-        print(f" [SUCCESS] Shortcut created on your Desktop:")
+        print("\n=======================================================")
+        print(" [SUCCESS] Shortcut created on your Desktop:")
         print(f" {shortcut_path}")
-        print(f"=======================================================\n")
+        print("=======================================================\n")
     finally:
         if os.path.exists(temp_vbs):
             os.remove(temp_vbs)
 
 if __name__ == "__main__":
     create_desktop_shortcut()
+

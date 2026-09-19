@@ -8,6 +8,9 @@
         clipboard: []
     };
 
+    let tabCounter = 1;
+
+
     // --- Configuration Constants ---
     const DEFAULT_SWATCH_COLORS = ["#00FF00", "#FF0000", "#00FFFF", "#FFFF00", "#FFFFFF", "#000000"];
     const LOCAL_STORAGE_KEY = "pcr_gel_genie_session";
@@ -78,6 +81,7 @@
         canvasViewport: document.getElementById("canvas-viewport"),
         statusMessage: document.getElementById("status-message"),
         coordDisplay: document.getElementById("coord-display"),
+        selectionCount: document.getElementById("selection-count"),
         // Suite Navigation
         navGelBtn: document.getElementById("nav-gel-btn"),
         navColonyBtn: document.getElementById("nav-colony-btn"),
@@ -133,6 +137,37 @@
 
     function generateId() {
         return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    }
+
+    function sanitizeHexColor(col, defaultCol = "#00FF00") {
+        if (typeof col === "string" && /^#([0-9a-fA-F]{3,8})$/.test(col.trim())) {
+            return col.trim();
+        }
+        return defaultCol;
+    }
+
+    function sanitizeText(str) {
+        if (typeof str !== "string") return "";
+        return str.slice(0, 500);
+    }
+
+    function sanitizeNumber(val, defaultVal, min = -Infinity, max = Infinity) {
+        const num = Number(val);
+        if (isNaN(num) || !isFinite(num)) return defaultVal;
+        return Math.max(min, Math.min(max, num));
+    }
+
+    function sanitizeCsvCellJs(val) {
+        if (val === null || val === undefined) return '""';
+        const str = String(val);
+        let escaped = str;
+        if (str.length > 0 && ['=', '+', '-', '@', '\t', '\r'].includes(str[0])) {
+            escaped = "'" + str;
+        }
+        if (escaped.includes('"') || escaped.includes(',') || escaped.includes('\n') || escaped.includes('\r')) {
+            return `"${escaped.replace(/"/g, '""')}"`;
+        }
+        return escaped;
     }
 
     // --- Lane Pattern Parser (Supports ranges like 1-29, S111-S119, literal names, commas) ---
@@ -387,12 +422,10 @@
     }
 
     function updateSelectionStatus() {
+        if (!elements.selectionCount) return;
         const tab = getActiveTab();
-        if (!tab) {
-            elements.selectionCount.innerHTML = `<i class="fa-solid fa-object-group"></i> 0 selected`;
-            return;
-        }
-        elements.selectionCount.innerHTML = `<i class="fa-solid fa-object-group"></i> ${tab.selectedIds.length} selected`;
+        const count = tab ? tab.selectedIds.length : 0;
+        elements.selectionCount.innerHTML = `<i class="fa-solid fa-object-group"></i> ${count} selected`;
     }
 
     // --- Tab management UI ---
@@ -579,8 +612,10 @@
 
     function renderActiveTabGrid() {
         const tab = getActiveTab();
+        while (elements.gridOverlaySvg.firstChild) {
+            elements.gridOverlaySvg.removeChild(elements.gridOverlaySvg.firstChild);
+        }
         if (!tab || !tab.gridEnabled || !tab.imageWidth || !tab.imageHeight) {
-            elements.gridOverlaySvg.innerHTML = "";
             return;
         }
         
@@ -589,8 +624,10 @@
         
         const xSpacing = Math.max(5, tab.gridXSpacing);
         const ySpacing = Math.max(5, tab.gridYSpacing);
+        const gridColor = sanitizeHexColor(tab.gridColor, "#E29C3D");
         
-        let svgContent = "";
+        const svgNS = "http://www.w3.org/2000/svg";
+        const fragment = document.createDocumentFragment();
         
         // Vertical lines
         let xStart = (tab.gridXOffset % xSpacing);
@@ -600,7 +637,14 @@
         
         for (let x = xStart; x <= w; x += xSpacing) {
             if (x >= 0) {
-                svgContent += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="${tab.gridColor}" stroke-width="1" />`;
+                const line = document.createElementNS(svgNS, "line");
+                line.setAttribute("x1", String(x));
+                line.setAttribute("y1", "0");
+                line.setAttribute("x2", String(x));
+                line.setAttribute("y2", String(h));
+                line.setAttribute("stroke", gridColor);
+                line.setAttribute("stroke-width", "1");
+                fragment.appendChild(line);
             }
         }
         
@@ -612,11 +656,18 @@
         
         for (let y = yStart; y <= h; y += ySpacing) {
             if (y >= 0) {
-                svgContent += `<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${tab.gridColor}" stroke-width="1" />`;
+                const line = document.createElementNS(svgNS, "line");
+                line.setAttribute("x1", "0");
+                line.setAttribute("y1", String(y));
+                line.setAttribute("x2", String(w));
+                line.setAttribute("y2", String(y));
+                line.setAttribute("stroke", gridColor);
+                line.setAttribute("stroke-width", "1");
+                fragment.appendChild(line);
             }
         }
         
-        elements.gridOverlaySvg.innerHTML = svgContent;
+        elements.gridOverlaySvg.appendChild(fragment);
     }
 
     // --- Interactive Labels Rendering and DOM Actions ---
@@ -682,6 +733,11 @@
     }
 
     function incrementLabelString(str) {
+        if (!str) return "1";
+        const trimmed = str.trim();
+        if (["ladder", "nc", "pc", "blank", "ctrl", "control", "water", "ntc", "marker"].includes(trimmed.toLowerCase())) {
+            return str;
+        }
         const match = str.match(/(\d+)$/);
         if (match) {
             const numStr = match[1];
@@ -750,11 +806,16 @@
         dragData.initialPositions.forEach(pos => {
             const label = tab.labels[pos.id];
             if (label) {
-                // Clamp within bounds
-                label.x = Math.max(0, Math.min(tab.imageWidth - 10, pos.x + dx));
-                label.y = Math.max(0, Math.min(tab.imageHeight - 10, pos.y + dy));
-                
                 const domNode = document.getElementById(`label-${label.id}`);
+                const lblW = domNode ? domNode.offsetWidth : 30;
+                const lblH = domNode ? domNode.offsetHeight : 16;
+                const maxW = tab.imageWidth > 0 ? Math.max(0, tab.imageWidth - lblW) : 10000;
+                const maxH = tab.imageHeight > 0 ? Math.max(0, tab.imageHeight - lblH) : 10000;
+                
+                // Clamp within full element bounds
+                label.x = Math.max(0, Math.min(maxW, pos.x + dx));
+                label.y = Math.max(0, Math.min(maxH, pos.y + dy));
+                
                 if (domNode) {
                     domNode.style.left = label.x + "px";
                     domNode.style.top = label.y + "px";
@@ -762,6 +823,7 @@
             }
         });
     }
+
 
     function handleLabelMouseUp() {
         if (dragData.active) {
@@ -1356,16 +1418,63 @@
         
         try {
             const parsed = JSON.parse(stored);
-            if (!parsed.tabs || parsed.tabs.length === 0) return false;
+            if (!parsed || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return false;
             
-            // Re-inflate tabs including empty stacks
-            state.tabs = parsed.tabs.map(t => ({
-                ...t,
-                undoStack: [],
-                redoStack: []
-            }));
-            state.activeTabId = parsed.activeTabId || state.tabs[0].id;
+            // Re-inflate tabs with strict validation
+            state.tabs = parsed.tabs.map(t => {
+                if (!t || typeof t !== "object") return createNewTabState();
+                
+                const validLabels = {};
+                if (t.labels && typeof t.labels === "object") {
+                    Object.values(t.labels).forEach(lbl => {
+                        if (lbl && typeof lbl === "object" && lbl.id) {
+                            const lblId = String(lbl.id);
+                            validLabels[lblId] = {
+                                id: lblId,
+                                text: sanitizeText(lbl.text || ""),
+                                x: sanitizeNumber(lbl.x, 0, 0, 50000),
+                                y: sanitizeNumber(lbl.y, 0, 0, 50000),
+                                color: sanitizeHexColor(lbl.color, "#00FF00"),
+                                fontFamily: typeof lbl.fontFamily === "string" ? lbl.fontFamily.slice(0, 50) : "Arial",
+                                fontSize: Math.round(sanitizeNumber(lbl.fontSize, 12, 4, 144)),
+                                rotation: sanitizeNumber(lbl.rotation, 0, -360, 360) % 360
+                            };
+                        }
+                    });
+                }
+                
+                const validSelectedIds = Array.isArray(t.selectedIds)
+                    ? t.selectedIds.map(String).filter(id => Boolean(validLabels[id]))
+                    : [];
+                
+                return {
+                    id: typeof t.id === "string" ? t.id : generateId(),
+                    name: sanitizeText(t.name || "Gel Tab"),
+                    imageSrc: (typeof t.imageSrc === "string" && (t.imageSrc.startsWith("data:image/") || t.imageSrc.startsWith("blob:") || t.imageSrc.startsWith("http"))) ? t.imageSrc : null,
+                    imageWidth: Math.round(sanitizeNumber(t.imageWidth, 0, 0, 50000)),
+                    imageHeight: Math.round(sanitizeNumber(t.imageHeight, 0, 0, 50000)),
+                    labels: validLabels,
+                    selectedIds: validSelectedIds,
+                    gridEnabled: Boolean(t.gridEnabled),
+                    gridXSpacing: Math.round(sanitizeNumber(t.gridXSpacing, 40, 5, 500)),
+                    gridYSpacing: Math.round(sanitizeNumber(t.gridYSpacing, 40, 5, 500)),
+                    gridXOffset: Math.round(sanitizeNumber(t.gridXOffset, 0, -500, 500)),
+                    gridYOffset: Math.round(sanitizeNumber(t.gridYOffset, 0, -500, 500)),
+                    gridColor: sanitizeHexColor(t.gridColor, "#E29C3D"),
+                    slideTitle: sanitizeText(t.slideTitle || ""),
+                    defaultLabelFontFamily: typeof t.defaultLabelFontFamily === "string" ? t.defaultLabelFontFamily.slice(0, 50) : "Arial",
+                    defaultLabelSize: Math.round(sanitizeNumber(t.defaultLabelSize, 12, 6, 72)),
+                    defaultLabelColor: sanitizeHexColor(t.defaultLabelColor, "#00FF00"),
+                    undoStack: [],
+                    redoStack: []
+                };
+            });
+            
+            const validActive = state.tabs.find(t => t.id === parsed.activeTabId);
+            state.activeTabId = validActive ? validActive.id : state.tabs[0].id;
+            tabCounter = Math.max(state.tabs.length + 1, tabCounter);
             return true;
+
         } catch(e) {
             console.error("Failed to recover stored session", e);
             return false;
@@ -1398,9 +1507,12 @@
                 ctx.save();
                 
                 // Bounding calculations
-                ctx.font = `bold ${label.fontSize}px ${label.fontFamily || 'Arial'}`;
+                const family = label.fontFamily || 'Arial';
+                const fontSpec = family.includes(' ') && !family.startsWith('"') ? `"${family}"` : family;
+                ctx.font = `bold ${label.fontSize}px ${fontSpec}`;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
+
                 
                 const textMetrics = ctx.measureText(label.text);
                 const textWidth = textMetrics.width;
@@ -1747,12 +1859,12 @@
 
     // Tab Adding
     elements.addTabBtn.addEventListener("click", () => {
-        const newCount = state.tabs.length + 1;
-        const newTab = createNewTabState(`Gel ${newCount}`);
+        const newTab = createNewTabState(`Gel ${tabCounter++}`);
         state.tabs.push(newTab);
         switchTab(newTab.id);
         autosaveSession();
     });
+
 
     // Click on canvas viewport to deselect all labels
     elements.canvasViewport.addEventListener("click", (e) => {
@@ -2010,9 +2122,26 @@
             }
         }
 
-        colonyState.colonies = detectedColonies;
+        // Separate and preserve manual markers
+        const manualMarkers = (colonyState.colonies || []).filter(c => c.isManual);
+        let finalColonies = detectedColonies;
+        let nextManualId = detectedColonies.length + 1;
+        manualMarkers.forEach(m => {
+            m.id = nextManualId++;
+            finalColonies.push(m);
+        });
+
+        colonyState.colonies = finalColonies;
         renderColonyMarkers();
         updateColonyStatistics();
+    }
+
+    let colonyDetectTimer = null;
+    function debouncedColonyAiDetection(delayMs = 120) {
+        if (colonyDetectTimer) clearTimeout(colonyDetectTimer);
+        colonyDetectTimer = setTimeout(() => {
+            runColonyAiDetection();
+        }, delayMs);
     }
 
     function renderColonyMarkers() {
@@ -2108,23 +2237,24 @@
         }
     });
 
-    // Colony Parameter Inputs Live Tuning
+    // Colony Parameter Inputs Live Tuning with Debounce
     elements.colonySensSlider.addEventListener("input", (e) => {
         elements.colonySensVal.textContent = e.target.value;
-        runColonyAiDetection();
+        debouncedColonyAiDetection(120);
     });
 
     elements.colonyCircSlider.addEventListener("input", (e) => {
         elements.colonyCircVal.textContent = (parseInt(e.target.value, 10) / 100).toFixed(2);
-        runColonyAiDetection();
+        debouncedColonyAiDetection(120);
     });
 
-    elements.colonyMinRad.addEventListener("change", runColonyAiDetection);
-    elements.colonyMaxRad.addEventListener("change", runColonyAiDetection);
-    elements.colonyMaskDish.addEventListener("change", runColonyAiDetection);
-    elements.colonyInvertMode.addEventListener("change", runColonyAiDetection);
+    elements.colonyMinRad.addEventListener("change", () => debouncedColonyAiDetection(50));
+    elements.colonyMaxRad.addEventListener("change", () => debouncedColonyAiDetection(50));
+    elements.colonyMaskDish.addEventListener("change", () => debouncedColonyAiDetection(50));
+    elements.colonyInvertMode.addEventListener("change", () => debouncedColonyAiDetection(50));
 
     // Marker styling changes
+
     elements.colonyColorSelect.addEventListener("change", renderColonyMarkers);
     elements.colonyMarkerSize.addEventListener("change", renderColonyMarkers);
     elements.colonyShowNumbers.addEventListener("change", renderColonyMarkers);
@@ -2231,28 +2361,41 @@
 
         const vol = parseFloat(elements.colonyVolumeInput.value) || 0.1;
         const dilution = parseFloat(elements.colonyDilutionSelect.value) || 1.0;
-        const cfu = (colonyState.colonies.length * dilution) / vol;
+        const cfu = vol > 0 ? (colonyState.colonies.length * dilution) / vol : 0;
 
-        let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "# Gel Labeler - Colony & Seed AI Vision Report\n";
-        csvContent += `Source Image,${colonyState.fileName || "Unknown"}\n`;
-        csvContent += `Total Count,${colonyState.colonies.length}\n`;
-        csvContent += `Plated Volume (mL),${vol}\n`;
-        csvContent += `Dilution Factor,${dilution}\n`;
-        csvContent += `Calculated CFU/mL,${cfu.toFixed(2)}\n\n`;
-        csvContent += "Colony ID,X (px),Y (px),Radius (px),Area (px^2),Type\n";
+        const lines = [
+            "# Gel Labeler - Colony & Seed AI Vision Report",
+            `Source Image,${sanitizeCsvCellJs(colonyState.fileName || "Unknown")}`,
+            `Total Count,${colonyState.colonies.length}`,
+            `Plated Volume (mL),${vol}`,
+            `Dilution Factor,${dilution}`,
+            `Calculated CFU/mL,${cfu.toFixed(2)}`,
+            "",
+            "Colony ID,X (px),Y (px),Radius (px),Area (px^2),Type"
+        ];
 
         colonyState.colonies.forEach(c => {
-            csvContent += `${c.id},${c.x},${c.y},${c.radius},${c.area},${c.isManual ? "Manual" : "AI Detected"}\n`;
+            lines.push([
+                sanitizeCsvCellJs(c.id),
+                c.x,
+                c.y,
+                c.radius,
+                c.area,
+                sanitizeCsvCellJs(c.isManual ? "Manual" : "AI Detected")
+            ].join(","));
         });
 
-        const encodedUri = encodeURI(csvContent);
+        const csvContent = lines.join("\r\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", (colonyState.fileName || "plate").replace(/\.[^/.]+$/, "") + "_colony_report.csv");
+        link.setAttribute("href", url);
+        const cleanBase = (colonyState.fileName || "plate").replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_\-]/g, "_");
+        link.setAttribute("download", `${cleanBase}_colony_report.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
         showStatus("Colony CSV report exported successfully.");
     }
 

@@ -1,6 +1,7 @@
-from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QMessageBox
+from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QBrush
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QBrush
+
 from gel_labeler.core.project import GelProject
 from gel_labeler.gui.label_item import LabelItem
 from gel_labeler.gui.settings_dialog import SettingsDialog
@@ -104,9 +105,22 @@ class GelCanvas(QGraphicsView):
         self.scene.clearSelection()
         if self.scene.focusItem():
             self.scene.focusItem().clearFocus()
+        if self.temp_marker:
+            try:
+                self.scene.removeItem(self.temp_marker)
+            except Exception:
+                pass
+            self.temp_marker = None
+        self.span_mode = False
+        self.ladder_mode = False
+        self.align_mode = False
+        self.align_first_point = None
+        self.span_first_point = None
+        self.ladder_first_point = None
         self.scene.clear()
         self.bg_pixmap_item = None
         self.label_items.clear()
+
 
     def fit_image_in_view(self):
         """Scales the view to fit the loaded gel image while keeping aspect ratio."""
@@ -317,9 +331,9 @@ class GelCanvas(QGraphicsView):
                     click_mode = self.window().click_mode_combo.currentText()
                 
                 if "Disabled" in click_mode:
-                    super().mousePressEvent(event)
                     return
                 elif "Quick Manual" in click_mode:
+
                     self.prompt_quick_manual_label(scene_pos)
                 else:
                     self.add_auto_number_label(scene_pos)

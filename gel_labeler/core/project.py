@@ -1,12 +1,17 @@
 import json
 import csv
 import os
+import re
+import time
+import logging
 from typing import Dict, List, Optional
 import cv2
 import numpy as np
 from PyQt6.QtGui import QImage, QTransform
-from PyQt6.QtCore import QPointF, QRectF, QRect, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from gel_labeler.core.label import GelLabel
+
+logger = logging.getLogger("gel_labeler")
 
 class GelProject:
     """Manages the current gel image state and its labels.
@@ -95,27 +100,52 @@ class GelProject:
         self.is_dirty = False
         self.gray_data = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
 
-    def rotate_image(self, angle_deg: float):
-        """Rotates the background image and maps label coordinates to the new rotated space."""
-        if not self.image_path:
-            return
-        self.save_undo_state()
+    def rotate_image(self, angle_deg: float) -> bool:
+        """Rotates the background image and maps label coordinates to the new rotated space.
         
+        Saves the rotated image to a uniquely named file without overwriting source images.
+        Returns True if rotation succeeded, False otherwise.
+        """
+        if not self.image_path or not os.path.exists(self.image_path):
+            return False
+            
         image = QImage(self.image_path)
         if image.isNull():
-            return
+            logger.error(f"Cannot rotate null or invalid image: {self.image_path}")
+            return False
             
         transform = QTransform().rotate(angle_deg)
         rotated_image = image.transformed(transform, Qt.TransformationMode.SmoothTransformation)
-        
-        # Save to processed file path
-        base, ext = os.path.splitext(self.image_path)
-        if not base.endswith("_processed"):
-            new_path = f"{base}_processed.png"
-        else:
-            new_path = f"{base}.png"
+        if rotated_image.isNull():
+            logger.error("Rotation transformed image is null.")
+            return False
             
-        rotated_image.save(new_path)
+        # Generate non-colliding unique filename
+        dir_name = os.path.dirname(self.image_path)
+        base_name = os.path.splitext(os.path.basename(self.image_path))[0]
+        # Clean any preexisting timestamp suffix to avoid overly long chains
+        base_clean = re.sub(r"_rotated_\d{8}_\d{6}_\d+", "", base_name)
+        base_clean = re.sub(r"_processed$", "", base_clean)
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+        unique_suffix = f"_rotated_{timestamp_str}_{int((time.time() % 1) * 1000):03d}"
+        new_path = os.path.join(dir_name, f"{base_clean}{unique_suffix}.png")
+        
+        # Attempt to save
+        if not rotated_image.save(new_path, "PNG"):
+            logger.error(f"Failed to save rotated image to {new_path}")
+            return False
+            
+        # Verify saved image can be read by cv2
+        new_gray = cv2.imread(new_path, cv2.IMREAD_GRAYSCALE)
+        if new_gray is None:
+            logger.error(f"Saved rotated image could not be loaded back by cv2: {new_path}")
+            try:
+                os.remove(new_path)
+            except Exception:
+                pass
+            return False
+
+        self.save_undo_state()
         
         # Map existing labels
         rect = QRectF(0, 0, self.image_width, self.image_height)
@@ -130,8 +160,9 @@ class GelProject:
         self.image_path = new_path
         self.image_width = rotated_image.width()
         self.image_height = rotated_image.height()
+        self.gray_data = new_gray
         self.is_dirty = True
-        self.gray_data = cv2.imread(new_path, cv2.IMREAD_GRAYSCALE)
+        return True
 
 
     def add_label(self, text: str, x: float, y: float, 
@@ -180,26 +211,52 @@ class GelProject:
         self.is_dirty = False
 
     def load_from_json(self, file_path: str) -> bool:
-        """Loads label data from a JSON file."""
+        """Loads label data from a JSON file with schema validation."""
         try:
+            if not os.path.exists(file_path):
+                logger.error(f"JSON file does not exist: {file_path}")
+                return False
+                
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Note: We keep the current image_path if it doesn't match or is missing,
-            # but update labels.
+            if not isinstance(data, dict):
+                logger.error("Project JSON root must be an object.")
+                return False
+                
+            labels_raw = data.get("labels")
+            if labels_raw is None or not isinstance(labels_raw, list):
+                logger.error("Project JSON missing valid 'labels' array.")
+                return False
+                
+            self.save_undo_state()
             self.labels.clear()
-            for label_data in data.get("labels", []):
-                label = GelLabel.from_dict(label_data)
-                self.labels[label.id] = label
+            for label_data in labels_raw:
+                if isinstance(label_data, dict):
+                    label = GelLabel.from_dict(label_data)
+                    self.labels[label.id] = label
             
-            self.is_dirty = False
+            self.is_dirty = True
             return True
         except Exception as e:
-            print(f"Error loading project JSON: {e}")
+            logger.error(f"Error loading project JSON: {e}", exc_info=True)
             return False
 
+    @staticmethod
+    def sanitize_csv_cell(val) -> str:
+        """Neutralizes CSV / Excel Formula Injection (DDE).
+        
+        If a string begins with =, +, -, @, \t, or \r, prepends a single quote (').
+        """
+        if val is None:
+            return ""
+        s = str(val)
+        if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+            return f"'{s}"
+        return s
+
     def export_to_csv(self, file_path: str):
-        """Exports the labels database to a CSV file."""
+        """Exports the labels database to a CSV file with DDE formula injection neutralization."""
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # Write Header
@@ -207,13 +264,13 @@ class GelProject:
             # Write label rows
             for label in self.labels.values():
                 writer.writerow([
-                    label.id,
-                    label.text,
+                    self.sanitize_csv_cell(label.id),
+                    self.sanitize_csv_cell(label.text),
                     round(label.x, 2),
                     round(label.y, 2),
-                    label.color,
+                    self.sanitize_csv_cell(label.color),
                     label.font_size,
-                    label.font_family
+                    self.sanitize_csv_cell(label.font_family)
                 ])
 
     def generate_grid_from_tiers(self, tiers_config: List[dict],
@@ -542,42 +599,29 @@ class GelProject:
                 w_px = 60.0
                 h_px = 24.0
                 try:
-                    from PyQt6.QtWidgets import QGraphicsTextItem, QApplication
-                    from PyQt6.QtGui import QFont
-                    
-                    app = QApplication.instance()
-                    if not app:
-                        app = QApplication([])
-                        
-                    item = QGraphicsTextItem()
-                    item.setPlainText(label.text)
-                    font = QFont(label.font_family or 'Arial', label.font_size)
-                    font.setBold(True)
-                    item.setFont(font)
-                    rect = item.boundingRect()
-                    w_px = rect.width()
-                    h_px = rect.height()
+                    from PyQt6.QtWidgets import QApplication
+                    if QApplication.instance() is not None:
+                        from PyQt6.QtGui import QFont, QFontMetricsF
+                        font = QFont(label.font_family or 'Arial', label.font_size)
+                        font.setBold(True)
+                        fm = QFontMetricsF(font)
+                        rect = fm.boundingRect(label.text)
+                        w_px = max(15.0, rect.width() + 10.0)
+                        h_px = max(10.0, rect.height() + 4.0)
+                    else:
+                        w_px = max(15.0, len(label.text) * label.font_size * 0.8 + 10.0)
+                        h_px = label.font_size * 1.5
                 except Exception:
-                    # Sensible approximation
-                    w_px = max(15.0, len(label.text) * label.font_size * 0.6 + 10.0)
+                    w_px = max(15.0, len(label.text) * label.font_size * 0.8 + 10.0)
                     h_px = label.font_size * 1.5
-                
-                # Calculate center position in pixels
-                cx_px = label.x + w_px / 2.0
-                cy_px = label.y + h_px / 2.0
-                
-                # Convert center to slide inches
-                cx_in = left_in + cx_px * scale
-                cy_in = top_in + cy_px * scale
-                
+
                 # Set text box dimensions in inches
-                # Add a tiny padding to prevent any wrapping issues
-                box_w_in = (w_px + 10.0) * scale
-                box_h_in = (h_px + 2.0) * scale
-                
-                tx = cx_in - box_w_in / 2.0
-                ty = cy_in - box_h_in / 2.0
-                
+                box_w_in = max(w_px + 10.0, 60.0) * scale
+                box_h_in = max(h_px + 2.0, 24.0) * scale
+
+                tx = left_in + (label.x - 5.0) * scale
+                ty = top_in + (label.y - 1.0) * scale
+
                 tx_shape = slide.shapes.add_textbox(
                     Inches(tx),
                     Inches(ty),

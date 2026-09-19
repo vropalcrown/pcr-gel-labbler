@@ -106,7 +106,11 @@ class LabelItem(QGraphicsTextItem):
             self.label_data.update_position(self._drag_start_pos.x(), self._drag_start_pos.y())
             
             if self.scene() and self.scene().views():
-                self.scene().views()[0].project.save_undo_state()
+                view = self.scene().views()[0]
+                view.project.save_undo_state()
+                view.project.is_dirty = True
+                if hasattr(view.window(), 'update_window_title'):
+                    view.window().update_window_title()
                 
             self.setPos(new_pos)
             self.label_data.update_position(new_pos.x(), new_pos.y())
@@ -131,8 +135,12 @@ class LabelItem(QGraphicsTextItem):
 
     def open_edit_dialog(self):
         """Opens the SettingsDialog to edit label text, color, size, and rotation."""
+        parent_widget = None
+        if self.scene() and self.scene().views():
+            parent_widget = self.scene().views()[0]
+            
         dialog = SettingsDialog(
-            parent=None,
+            parent=parent_widget,
             initial_text=self.label_data.text,
             initial_color=self.label_data.color,
             initial_font_size=self.label_data.font_size,
@@ -143,7 +151,11 @@ class LabelItem(QGraphicsTextItem):
             text, color, size, rotation = dialog.get_values()
             if text:
                 if self.scene() and self.scene().views():
-                    self.scene().views()[0].project.save_undo_state()
+                    view = self.scene().views()[0]
+                    view.project.save_undo_state()
+                    view.project.is_dirty = True
+                    if hasattr(view.window(), 'update_window_title'):
+                        view.window().update_window_title()
                 self.label_data.update_style(text=text, color=color, font_size=size, rotation=rotation)
                 self.refresh()
                 if self.update_callback:
@@ -152,6 +164,7 @@ class LabelItem(QGraphicsTextItem):
                 # If text was cleared, delete the label
                 if self.delete_callback:
                     self.delete_callback(self.label_data.id)
+
 
     def mouseDoubleClickEvent(self, event):
         """Opens the SettingsDialog when double-clicked."""
