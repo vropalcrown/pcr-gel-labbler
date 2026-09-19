@@ -55,9 +55,15 @@
         fontSizeInput: document.getElementById("font-size-input"),
         colorSwatches: document.getElementById("color-swatches"),
         alignLeftBtn: document.getElementById("align-left-btn"),
+        alignCenterBtn: document.getElementById("align-center-btn"),
+        alignRightBtn: document.getElementById("align-right-btn"),
         alignTopBtn: document.getElementById("align-top-btn"),
+        alignMiddleBtn: document.getElementById("align-middle-btn"),
+        alignBottomBtn: document.getElementById("align-bottom-btn"),
         distHorizBtn: document.getElementById("dist-horiz-btn"),
         distVertBtn: document.getElementById("dist-vert-btn"),
+        selectAllBtn: document.getElementById("select-all-btn"),
+        alignEverythingBtn: document.getElementById("align-everything-btn"),
         gridEnableCheck: document.getElementById("grid-enable-check"),
         gridColorSelect: document.getElementById("grid-color-select"),
         gridXSpacing: document.getElementById("grid-x-spacing"),
@@ -73,6 +79,9 @@
         clearLabelsBtn: document.getElementById("clear-labels-btn"),
         uploadDropzone: document.getElementById("upload-dropzone"),
         fileUploadInput: document.getElementById("file-upload-input"),
+        headerFileInput: document.getElementById("header-file-input"),
+        sidebarFileInput: document.getElementById("sidebar-file-input"),
+        gelImgInfo: document.getElementById("gel-img-info"),
         canvasContainer: document.getElementById("canvas-container"),
         canvasWrapper: document.getElementById("canvas-wrapper"),
         gelImageDisplay: document.getElementById("gel-image-display"),
@@ -82,6 +91,12 @@
         statusMessage: document.getElementById("status-message"),
         coordDisplay: document.getElementById("coord-display"),
         selectionCount: document.getElementById("selection-count"),
+        // Floating canvas toolbar
+        floatingCanvasToolbar: document.getElementById("floating-canvas-toolbar"),
+        zoomInBtn: document.getElementById("zoom-in-btn"),
+        zoomOutBtn: document.getElementById("zoom-out-btn"),
+        zoomResetBtn: document.getElementById("zoom-reset-btn"),
+        zoomFitBtn: document.getElementById("zoom-fit-btn"),
         // Suite Navigation
         navGelBtn: document.getElementById("nav-gel-btn"),
         navColonyBtn: document.getElementById("nav-colony-btn"),
@@ -90,6 +105,7 @@
         gelTabBarContainer: document.getElementById("gel-tab-bar-container"),
         gelGlobalActions: document.getElementById("gel-global-actions"),
         colonyGlobalActions: document.getElementById("colony-global-actions"),
+        colonyHeaderFileInput: document.getElementById("colony-header-file-input"),
         
         // Modal elements
         editLabelModal: document.getElementById("edit-label-modal"),
@@ -520,6 +536,9 @@
             elements.uploadDropzone.classList.add("hidden");
             elements.canvasContainer.classList.remove("hidden");
             elements.gelImageDisplay.src = tab.imageSrc;
+            if (elements.gelImgInfo) {
+                elements.gelImgInfo.textContent = `${tab.name} (${tab.imageWidth}×${tab.imageHeight} px)`;
+            }
             
             // Wait for image dimensions to confirm sizes
             elements.gelImageDisplay.onload = function() {
@@ -535,8 +554,12 @@
             elements.uploadDropzone.classList.remove("hidden");
             elements.canvasContainer.classList.add("hidden");
             elements.gelImageDisplay.src = "";
+            if (elements.gelImgInfo) {
+                elements.gelImgInfo.textContent = "No image loaded (drop or browse)";
+            }
         }
         
+        applyCanvasZoom(1.0);
         updateHeaderActionButtons();
         updateSelectionStatus();
         showStatus(`Active gel tab: "${tab.name}"`);
@@ -1187,49 +1210,157 @@
         saveUndoState(tab);
         
         const selectedLabels = tab.selectedIds.map(id => tab.labels[id]).filter(Boolean);
+        if (selectedLabels.length < 2) return;
         
         if (type === "Left") {
             const minX = Math.min(...selectedLabels.map(l => l.x));
             selectedLabels.forEach(l => l.x = minX);
             showStatus("Aligned selected labels Left.");
+        } else if (type === "Center") {
+            const avgX = Math.round(selectedLabels.reduce((s, l) => s + l.x, 0) / selectedLabels.length);
+            selectedLabels.forEach(l => l.x = avgX);
+            showStatus("Aligned selected labels Center.");
+        } else if (type === "Right") {
+            const maxX = Math.max(...selectedLabels.map(l => l.x));
+            selectedLabels.forEach(l => l.x = maxX);
+            showStatus("Aligned selected labels Right.");
         } else if (type === "Top") {
             const minY = Math.min(...selectedLabels.map(l => l.y));
             selectedLabels.forEach(l => l.y = minY);
             showStatus("Aligned selected labels Top.");
+        } else if (type === "Middle") {
+            const avgY = Math.round(selectedLabels.reduce((s, l) => s + l.y, 0) / selectedLabels.length);
+            selectedLabels.forEach(l => l.y = avgY);
+            showStatus("Aligned selected labels Middle.");
+        } else if (type === "Bottom") {
+            const maxY = Math.max(...selectedLabels.map(l => l.y));
+            selectedLabels.forEach(l => l.y = maxY);
+            showStatus("Aligned selected labels Bottom.");
         } else if (type === "DistributeHorizontally") {
             if (selectedLabels.length < 3) {
-                showStatus("Select at least 3 labels to distribute.");
+                showStatus("Select at least 3 labels to distribute horizontally.");
                 return;
             }
-            // Sort left-to-right
             selectedLabels.sort((a, b) => a.x - b.x);
             const leftmostX = selectedLabels[0].x;
             const rightmostX = selectedLabels[selectedLabels.length - 1].x;
             const spacing = (rightmostX - leftmostX) / (selectedLabels.length - 1);
             
             for (let i = 1; i < selectedLabels.length - 1; i++) {
-                selectedLabels[i].x = leftmostX + i * spacing;
+                selectedLabels[i].x = Math.round(leftmostX + i * spacing);
             }
             showStatus("Distributed selected labels horizontally.");
         } else if (type === "DistributeVertically") {
             if (selectedLabels.length < 3) {
-                showStatus("Select at least 3 labels to distribute.");
+                showStatus("Select at least 3 labels to distribute vertically.");
                 return;
             }
-            // Sort top-to-bottom
             selectedLabels.sort((a, b) => a.y - b.y);
             const topmostY = selectedLabels[0].y;
             const bottommostY = selectedLabels[selectedLabels.length - 1].y;
             const spacing = (bottommostY - topmostY) / (selectedLabels.length - 1);
             
             for (let i = 1; i < selectedLabels.length - 1; i++) {
-                selectedLabels[i].y = topmostY + i * spacing;
+                selectedLabels[i].y = Math.round(topmostY + i * spacing);
             }
             showStatus("Distributed selected labels vertically.");
         }
         
         renderActiveTabLabels();
         autosaveSession();
+    }
+
+    function selectAllLabels() {
+        const tab = getActiveTab();
+        if (!tab || Object.keys(tab.labels).length === 0) {
+            showStatus("No labels on canvas to select.");
+            return;
+        }
+        tab.selectedIds = Object.keys(tab.labels);
+        renderActiveTabLabels();
+        updateSelectionStatus();
+        showStatus(`Selected all ${tab.selectedIds.length} labels.`);
+    }
+
+    function alignEverything() {
+        const tab = getActiveTab();
+        if (!tab || Object.keys(tab.labels).length < 2) {
+            showStatus("Need at least 2 labels to auto-align.");
+            return;
+        }
+        saveUndoState(tab);
+        
+        // Group labels into horizontal rows (within 35px vertically)
+        const allLabels = Object.values(tab.labels);
+        const rows = [];
+        allLabels.forEach(lbl => {
+            let foundRow = rows.find(r => Math.abs(r.avgY - lbl.y) < 35);
+            if (foundRow) {
+                foundRow.labels.push(lbl);
+                foundRow.avgY = foundRow.labels.reduce((s, l) => s + l.y, 0) / foundRow.labels.length;
+            } else {
+                rows.push({ avgY: lbl.y, labels: [lbl] });
+            }
+        });
+        
+        rows.forEach(r => {
+            if (r.labels.length >= 2) {
+                const targetY = Math.round(r.avgY);
+                r.labels.sort((a, b) => a.x - b.x);
+                const minX = r.labels[0].x;
+                const maxX = r.labels[r.labels.length - 1].x;
+                const spacing = (maxX - minX) / (r.labels.length - 1);
+                r.labels.forEach((l, i) => {
+                    l.y = targetY;
+                    if (r.labels.length > 2 && i > 0 && i < r.labels.length - 1) {
+                        l.x = Math.round(minX + i * spacing);
+                    }
+                });
+            }
+        });
+        
+        renderActiveTabLabels();
+        autosaveSession();
+        showStatus("Auto-aligned all horizontal tiers and vertical lanes!");
+    }
+
+    // --- Canvas Zoom & View Controls ---
+    let canvasZoom = 1.0;
+
+    function applyCanvasZoom(zoom) {
+        canvasZoom = Math.max(0.2, Math.min(4.0, zoom));
+        if (elements.canvasWrapper) {
+            elements.canvasWrapper.style.transform = `scale(${canvasZoom})`;
+            elements.canvasWrapper.style.transformOrigin = "center center";
+        }
+        if (elements.zoomResetBtn) {
+            elements.zoomResetBtn.textContent = `${Math.round(canvasZoom * 100)}%`;
+        }
+    }
+
+    function zoomIn() {
+        applyCanvasZoom(canvasZoom * 1.2);
+    }
+
+    function zoomOut() {
+        applyCanvasZoom(canvasZoom / 1.2);
+    }
+
+    function zoomReset() {
+        applyCanvasZoom(1.0);
+    }
+
+    function zoomFit() {
+        const tab = getActiveTab();
+        if (!tab || !tab.imageWidth || !tab.imageHeight) {
+            applyCanvasZoom(1.0);
+            return;
+        }
+        const vpRect = elements.canvasViewport.getBoundingClientRect();
+        const scaleX = (vpRect.width - 60) / tab.imageWidth;
+        const scaleY = (vpRect.height - 60) / tab.imageHeight;
+        const fitScale = Math.min(scaleX, scaleY, 1.0);
+        applyCanvasZoom(Math.max(0.25, fitScale));
     }
 
     // --- Modeless Simulated Edit Properties Dialog ---
@@ -1774,11 +1905,40 @@
         autosaveSession();
     });
 
-    // Alignments
-    elements.alignLeftBtn.addEventListener("click", () => alignLabels("Left"));
-    elements.alignTopBtn.addEventListener("click", () => alignLabels("Top"));
-    elements.distHorizBtn.addEventListener("click", () => alignLabels("DistributeHorizontally"));
-    elements.distVertBtn.addEventListener("click", () => alignLabels("DistributeVertically"));
+    // Alignments & Distribution
+    if (elements.alignLeftBtn) elements.alignLeftBtn.addEventListener("click", () => alignLabels("Left"));
+    if (elements.alignCenterBtn) elements.alignCenterBtn.addEventListener("click", () => alignLabels("Center"));
+    if (elements.alignRightBtn) elements.alignRightBtn.addEventListener("click", () => alignLabels("Right"));
+    if (elements.alignTopBtn) elements.alignTopBtn.addEventListener("click", () => alignLabels("Top"));
+    if (elements.alignMiddleBtn) elements.alignMiddleBtn.addEventListener("click", () => alignLabels("Middle"));
+    if (elements.alignBottomBtn) elements.alignBottomBtn.addEventListener("click", () => alignLabels("Bottom"));
+    if (elements.distHorizBtn) elements.distHorizBtn.addEventListener("click", () => alignLabels("DistributeHorizontally"));
+    if (elements.distVertBtn) elements.distVertBtn.addEventListener("click", () => alignLabels("DistributeVertically"));
+    if (elements.selectAllBtn) elements.selectAllBtn.addEventListener("click", selectAllLabels);
+    if (elements.alignEverythingBtn) elements.alignEverythingBtn.addEventListener("click", alignEverything);
+
+    // Zoom & Canvas View Controls
+    if (elements.zoomInBtn) elements.zoomInBtn.addEventListener("click", zoomIn);
+    if (elements.zoomOutBtn) elements.zoomOutBtn.addEventListener("click", zoomOut);
+    if (elements.zoomResetBtn) elements.zoomResetBtn.addEventListener("click", zoomReset);
+    if (elements.zoomFitBtn) elements.zoomFitBtn.addEventListener("click", zoomFit);
+
+    // Extra File Input Handlers (Header & Sidebar)
+    if (elements.headerFileInput) {
+        elements.headerFileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleImageFileLoad(e.target.files[0]);
+        });
+    }
+    if (elements.sidebarFileInput) {
+        elements.sidebarFileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleImageFileLoad(e.target.files[0]);
+        });
+    }
+    if (elements.colonyHeaderFileInput) {
+        elements.colonyHeaderFileInput.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
+        });
+    }
 
     // Grid checkbox and sliders
     elements.gridEnableCheck.addEventListener("change", (e) => {

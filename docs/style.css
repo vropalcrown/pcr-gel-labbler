@@ -79,6 +79,9 @@ body {
     padding: 0 16px;
     z-index: 10;
     box-shadow: var(--shadow-sm);
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .logo-area {
@@ -86,6 +89,7 @@ body {
     align-items: center;
     gap: 8px;
     user-select: none;
+    flex-shrink: 0;
 }
 
 .app-logo {
@@ -119,8 +123,9 @@ body {
     display: flex;
     align-items: center;
     flex-grow: 1;
-    margin-left: 24px;
-    max-width: 50%;
+    margin-left: 20px;
+    max-width: 45%;
+    min-width: 0;
     height: 100%;
 }
 
@@ -130,6 +135,7 @@ body {
     gap: 4px;
     height: 100%;
     overflow-x: auto;
+    min-width: 0;
     scrollbar-width: none; /* Firefox */
 }
 .tab-bar::-webkit-scrollbar {
@@ -410,26 +416,39 @@ select:focus, input[type="text"]:focus, input[type="number"]:focus {
 }
 
 .tool-btn {
-    background-color: #444;
-    border: 1px solid #333;
-    border-radius: 3px;
+    background-color: #383838;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
     color: var(--text-secondary);
     cursor: pointer;
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
-    padding: 6px;
+    padding: 6px 8px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    min-height: 28px;
     transition: var(--transition-fast);
 }
 
 .tool-btn:hover {
-    background-color: #555;
+    background-color: #4a4a4a;
     color: var(--text-primary);
     border-color: var(--accent);
+}
+
+.primary-tool-btn {
+    background-color: rgba(226, 156, 61, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.primary-tool-btn:hover {
+    background-color: var(--accent);
+    color: #121212;
 }
 
 .toggle-row {
@@ -955,5 +974,92 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .span-mode-active .gel-label-item {
     pointer-events: none; /* Ignore individual label events during span point clicks */
+}
+
+/* Floating Canvas View Toolbar */
+.floating-canvas-toolbar {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    background: rgba(28, 28, 28, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 50;
+    box-shadow: var(--shadow-md);
+}
+
+.zoom-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.zoom-btn:hover {
+    background-color: var(--bg-active);
+    color: var(--text-primary);
+}
+
+/* Responsive Media Queries */
+@media (max-width: 1200px) {
+    .action-btn {
+        padding: 5px 10px;
+        font-size: 11px;
+        gap: 4px;
+    }
+    .tab-bar-container {
+        max-width: 35%;
+        margin-left: 12px;
+    }
+    .suite-switcher {
+        margin-left: 10px;
+    }
+}
+
+@media (max-width: 992px) {
+    .action-btn .btn-text {
+        display: none;
+    }
+    .action-btn {
+        padding: 6px 10px;
+        min-width: 32px;
+        justify-content: center;
+    }
+    .tab-bar-container {
+        max-width: 30%;
+    }
+    .floating-canvas-toolbar {
+        top: 10px;
+        right: 10px;
+    }
+}
+
+@media (max-width: 768px) {
+    .main-content {
+        flex-direction: column;
+    }
+    .control-panel {
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
+        height: auto;
+        max-height: 45vh;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .canvas-viewport {
+        height: 55vh;
+    }
 }
 

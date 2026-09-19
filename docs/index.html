@@ -46,27 +46,35 @@
 
             <!-- Gel Global Action Controls -->
             <div class="global-actions" id="gel-global-actions">
+                <label for="header-file-input" class="action-btn header-btn" title="Open Gel Image (Ctrl+O)" style="cursor: pointer;">
+                    <i class="fa-solid fa-folder-open"></i> <span class="btn-text">Open Image</span>
+                </label>
+                <input type="file" id="header-file-input" accept="image/*" class="hidden-file-input">
                 <button id="undo-btn" class="action-btn header-btn" title="Undo (Ctrl+Z)" disabled>
-                    <i class="fa-solid fa-rotate-left"></i> Undo
+                    <i class="fa-solid fa-rotate-left"></i> <span class="btn-text">Undo</span>
                 </button>
                 <button id="redo-btn" class="action-btn header-btn" title="Redo (Ctrl+Y)" disabled>
-                    <i class="fa-solid fa-rotate-right"></i> Redo
+                    <i class="fa-solid fa-rotate-right"></i> <span class="btn-text">Redo</span>
                 </button>
                 <button id="export-img-btn" class="action-btn primary-btn" title="Download annotated gel image">
-                    <i class="fa-solid fa-file-image"></i> Export PNG
+                    <i class="fa-solid fa-file-image"></i> <span class="btn-text">Export PNG</span>
                 </button>
                 <button id="export-pptx-btn" class="action-btn success-btn" title="Export to PowerPoint widescreen slides">
-                    <i class="fa-solid fa-file-powerpoint"></i> Export PPTX
+                    <i class="fa-solid fa-file-powerpoint"></i> <span class="btn-text">Export PPTX</span>
                 </button>
             </div>
 
             <!-- Colony Global Action Controls -->
             <div class="global-actions hidden" id="colony-global-actions">
+                <label for="colony-header-file-input" class="action-btn header-btn" title="Load Plate Image" style="cursor: pointer;">
+                    <i class="fa-solid fa-folder-open"></i> <span class="btn-text">Load Plate</span>
+                </label>
+                <input type="file" id="colony-header-file-input" accept="image/*" class="hidden-file-input">
                 <button id="colony-export-img-btn" class="action-btn primary-btn" title="Download marked plate image">
-                    <i class="fa-solid fa-file-image"></i> Export Plate PNG
+                    <i class="fa-solid fa-file-image"></i> <span class="btn-text">Export Plate PNG</span>
                 </button>
                 <button id="colony-export-csv-btn" class="action-btn success-btn" title="Export colony count data table">
-                    <i class="fa-solid fa-file-csv"></i> Export CSV
+                    <i class="fa-solid fa-file-csv"></i> <span class="btn-text">Export CSV</span>
                 </button>
             </div>
         </header>
@@ -75,6 +83,18 @@
         <div id="gel-module" class="main-content">
             <!-- Sidebar Panel: Controls & Options -->
             <aside class="control-panel">
+                <!-- 0. Gel Image Source Section -->
+                <section class="panel-section">
+                    <h2 class="section-title"><i class="fa-solid fa-image"></i> Gel Image Source</h2>
+                    <div class="section-content">
+                        <label for="sidebar-file-input" class="action-btn primary-btn w-100 select-file-label text-center" style="cursor: pointer;">
+                            <i class="fa-solid fa-upload"></i> Load / Replace Gel Image
+                        </label>
+                        <input type="file" id="sidebar-file-input" accept="image/*" class="hidden-file-input">
+                        <div id="gel-img-info" class="mt-2 text-muted font-11 text-center">No image loaded (drop or browse)</div>
+                    </div>
+                </section>
+
                 <!-- 1. Mark Well Boundaries Section (Span Placement) -->
                 <section class="panel-section" id="well-boundaries-section">
                     <h2 class="section-title"><i class="fa-solid fa-ruler-horizontal"></i> Mark Well Boundaries</h2>
@@ -106,7 +126,7 @@
                                 <input type="number" id="span-size-input" min="8" max="72" value="12">
                             </div>
                         </div>
-                        <button id="start-span-btn" class="action-btn primary-btn w-100 mt-2" title="Click first and last well to interpolate lane labels">
+                        <button id="start-span-btn" class="action-btn primary-btn w-100 mt-2" title="Click first and last well to interpolate lane labels (Ctrl+B)">
                             <i class="fa-solid fa-crosshairs"></i> Mark Well Boundaries
                         </button>
                     </div>
@@ -151,19 +171,41 @@
                 <!-- 3. Alignment Section -->
                 <section class="panel-section">
                     <h2 class="section-title"><i class="fa-solid fa-align-center"></i> PowerPoint Align & Distribute</h2>
-                    <div class="section-content grid-buttons">
-                        <button id="align-left-btn" class="tool-btn" title="Align selected labels to leftmost edge">
-                            <i class="fa-solid fa-align-left"></i> Left
-                        </button>
-                        <button id="align-top-btn" class="tool-btn" title="Align selected labels to topmost edge">
-                            <i class="fa-solid fa-align-justify fa-rotate-90"></i> Top
-                        </button>
-                        <button id="dist-horiz-btn" class="tool-btn" title="Distribute selected labels horizontally">
-                            <i class="fa-solid fa-arrows-left-right"></i> Dist. Horiz
-                        </button>
-                        <button id="dist-vert-btn" class="tool-btn" title="Distribute selected labels vertically">
-                            <i class="fa-solid fa-arrows-up-down"></i> Dist. Vert
-                        </button>
+                    <div class="section-content">
+                        <div class="grid-buttons">
+                            <button id="align-left-btn" class="tool-btn" title="Align selected labels to leftmost edge">
+                                <i class="fa-solid fa-align-left"></i> Left
+                            </button>
+                            <button id="align-center-btn" class="tool-btn" title="Align selected labels horizontally centered">
+                                <i class="fa-solid fa-align-center"></i> Center
+                            </button>
+                            <button id="align-right-btn" class="tool-btn" title="Align selected labels to rightmost edge">
+                                <i class="fa-solid fa-align-right"></i> Right
+                            </button>
+                            <button id="align-top-btn" class="tool-btn" title="Align selected labels to topmost edge">
+                                <i class="fa-solid fa-align-justify fa-rotate-90"></i> Top
+                            </button>
+                            <button id="align-middle-btn" class="tool-btn" title="Align selected labels vertically centered">
+                                <i class="fa-solid fa-grip-lines"></i> Middle
+                            </button>
+                            <button id="align-bottom-btn" class="tool-btn" title="Align selected labels to bottommost edge">
+                                <i class="fa-solid fa-align-justify fa-rotate-270"></i> Bottom
+                            </button>
+                            <button id="dist-horiz-btn" class="tool-btn" title="Distribute selected labels horizontally">
+                                <i class="fa-solid fa-arrows-left-right"></i> Dist. H
+                            </button>
+                            <button id="dist-vert-btn" class="tool-btn" title="Distribute selected labels vertically">
+                                <i class="fa-solid fa-arrows-up-down"></i> Dist. V
+                            </button>
+                        </div>
+                        <div class="grid-buttons mt-2">
+                            <button id="select-all-btn" class="tool-btn" title="Select all active labels (Ctrl+A)">
+                                <i class="fa-solid fa-check-double"></i> Select All
+                            </button>
+                            <button id="align-everything-btn" class="tool-btn primary-tool-btn" title="Auto-align all horizontal tiers and vertical ladders (Ctrl+Shift+A)">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Align
+                            </button>
+                        </div>
                     </div>
                 </section>
 
@@ -241,6 +283,22 @@
 
             <!-- Main Interactive Canvas Viewport -->
             <main class="canvas-viewport" id="canvas-viewport">
+                <!-- Floating Canvas View Toolbar -->
+                <div class="floating-canvas-toolbar" id="floating-canvas-toolbar">
+                    <button id="zoom-in-btn" class="icon-btn zoom-btn" title="Zoom In (+)">
+                        <i class="fa-solid fa-magnifying-glass-plus"></i>
+                    </button>
+                    <button id="zoom-out-btn" class="icon-btn zoom-btn" title="Zoom Out (-)">
+                        <i class="fa-solid fa-magnifying-glass-minus"></i>
+                    </button>
+                    <button id="zoom-reset-btn" class="icon-btn zoom-btn font-11" title="Reset Zoom (100%)">
+                        100%
+                    </button>
+                    <button id="zoom-fit-btn" class="icon-btn zoom-btn" title="Zoom to Fit View (Ctrl+0)">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                </div>
+
                 <!-- Span Mode Interactive Guide Banner -->
                 <div id="span-guide-banner" class="span-guide-banner hidden">
                     <i class="fa-solid fa-crosshairs text-accent pulse-icon"></i>
