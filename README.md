@@ -1,4 +1,4 @@
-# 🧪 Gel Labeler — PCR Gel Genie & AI Vision Colony Counter
+# 🧪 Gel Labeler — PCR Gel Genie & AI Vision Colony Counter(BETA)
 
 A modular, publication-ready bioinformatics desktop and web application designed for molecular biology labs.
 
