@@ -10,9 +10,20 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from PyQt6.QtCore import QStandardPaths
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from gel_labeler.gui.main_window import MainWindow
+from PyQt6.QtGui import QFont, QIcon
 
 logger = logging.getLogger("gel_labeler")
+
+
+def setup_windows_app_id():
+    """Sets a distinct AppUserModelID on Windows so the taskbar displays the app logo instead of Python."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            my_app_id = "devanandankc.gellabeler.gui.1.0"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(my_app_id)
+        except Exception as e:
+            logger.debug(f"Could not set Windows AppUserModelID: {e}")
 
 
 def get_app_data_dir() -> str:
@@ -92,15 +103,33 @@ def setup_exception_hooks():
 
 
 def main():
+    setup_windows_app_id()
+    
     app = QApplication(sys.argv)
+    
+    # Set native Windows typography default
+    app.setFont(QFont("Segoe UI", 9))
     
     # Set app-wide metadata
     app.setApplicationName("Gel Labeler")
     app.setOrganizationName("Bioinformatics Tools")
     
+    # Set application icon (ensures the Windows taskbar and all dialogs display the logo)
+    gui_dir = os.path.join(os.path.dirname(__file__), "gel_labeler", "gui")
+    p_ico = os.path.join(gui_dir, "logo.ico")
+    p_png = os.path.join(gui_dir, "logo.png")
+    app_icon = QIcon()
+    if os.path.exists(p_ico):
+        app_icon.addFile(p_ico)
+    if os.path.exists(p_png):
+        app_icon.addFile(p_png)
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+    
     setup_logging()
     setup_exception_hooks()
     
+    from gel_labeler.gui.main_window import MainWindow
     window = MainWindow()
     window.show()
     window.raise_()

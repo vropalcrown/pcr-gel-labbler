@@ -26,7 +26,7 @@ QMainWindow {
 
 QWidget {
     color: #cfcfcf;
-    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    font-family: 'Segoe UI', Arial, sans-serif;
     font-size: 11px;
 }
 
@@ -250,5 +250,50 @@ QHeaderView::section {
     padding: 4px;
     border: 1px solid #151515;
     font-weight: bold;
+}
+
+QTabWidget::pane {
+    border: 1px solid #151515;
+    background-color: #282828;
+}
+
+QTabBar::tab {
+    background-color: #1e1e1e;
+    color: #cfcfcf;
+    border: 1px solid #151515;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 6px 12px;
+    min-width: 85px;
+}
+
+QTabBar::tab:selected {
+    background-color: #282828;
+    border-color: #151515;
+    color: #e29c3d; /* Blender Orange */
+    font-weight: bold;
+}
+
+QTabBar::tab:hover {
+    background-color: #333333;
+    color: #ffffff;
+}
+
+QGroupBox {
+    background-color: #212121;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding-top: 14px;
+    font-weight: bold;
+    font-size: 12px;
+    color: #e29c3d;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 5px;
 }
 """

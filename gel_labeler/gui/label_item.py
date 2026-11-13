@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QGraphicsTextItem, QGraphicsDropShadowEffect, QMenu
 from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QColor, QFont, QCursor
+from PyQt6.QtGui import QColor, QFont, QCursor, QTransform
 from gel_labeler.core.label import GelLabel
 from gel_labeler.gui.settings_dialog import SettingsDialog
 
@@ -67,17 +67,33 @@ class LabelItem(QGraphicsTextItem):
         super().hoverLeaveEvent(event)
 
     def itemChange(self, change, value):
-        """Restricts drag motion so label stays within the scene boundaries."""
+        """Restricts drag motion so label stays within the scene boundaries, taking rotation into account."""
         if change == self.GraphicsItemChange.ItemPositionChange and self.scene():
             new_pos = value
             scene_rect = self.scene().sceneRect()
-            item_rect = self.boundingRect()
             
-            # Clamp X to scene bounds
-            x = max(scene_rect.left(), min(new_pos.x(), scene_rect.right() - item_rect.width()))
-            # Clamp Y to scene bounds
-            y = max(scene_rect.top(), min(new_pos.y(), scene_rect.bottom() - item_rect.height()))
+            # Account for rotation around transformOriginPoint to compute true visual bounds
+            t = QTransform()
+            t.translate(self.transformOriginPoint().x(), self.transformOriginPoint().y())
+            t.rotate(self.rotation())
+            t.translate(-self.transformOriginPoint().x(), -self.transformOriginPoint().y())
+            visual_rect = t.mapRect(self.boundingRect())
             
+            min_x = scene_rect.left() - visual_rect.left()
+            max_x = scene_rect.right() - visual_rect.right()
+            min_y = scene_rect.top() - visual_rect.top()
+            max_y = scene_rect.bottom() - visual_rect.bottom()
+            
+            if min_x > max_x:
+                x = min_x
+            else:
+                x = max(min_x, min(new_pos.x(), max_x))
+                
+            if min_y > max_y:
+                y = min_y
+            else:
+                y = max(min_y, min(new_pos.y(), max_y))
+                
             clamped = QPointF(x, y)
             
             # Trigger real-time callback if item is dragged
@@ -91,8 +107,18 @@ class LabelItem(QGraphicsTextItem):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event):
-        """Records the starting position before drag starts."""
+        """Records starting position before drag starts."""
         self._drag_start_pos = self.pos()
+        if self.scene() and self.scene().views():
+            view = self.scene().views()[0]
+            if not getattr(view, '_drag_active', False):
+                view._drag_active = True
+                view._drag_initial_positions = {
+                    item.label_data.id: (item.label_data.x, item.label_data.y)
+                    for item in self.scene().selectedItems()
+                    if hasattr(item, 'label_data')
+                }
+                view._drag_initial_positions[self.label_data.id] = (self.label_data.x, self.label_data.y)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -100,21 +126,46 @@ class LabelItem(QGraphicsTextItem):
         super().mouseReleaseEvent(event)
         new_pos = self.pos()
         
-        # Save undo state only if position changed
-        if hasattr(self, '_drag_start_pos') and self._drag_start_pos != new_pos:
-            self.setPos(self._drag_start_pos)
-            self.label_data.update_position(self._drag_start_pos.x(), self._drag_start_pos.y())
+        view = self.scene().views()[0] if (self.scene() and self.scene().views()) else None
+        if view and getattr(view, '_drag_active', False):
+            initial_positions = getattr(view, '_drag_initial_positions', {})
+            view._drag_active = False
+            view._drag_initial_positions = {}
             
-            if self.scene() and self.scene().views():
-                view = self.scene().views()[0]
+            any_moved = False
+            for item in self.scene().items():
+                if hasattr(item, 'label_data') and item.label_data.id in initial_positions:
+                    old_x, old_y = initial_positions[item.label_data.id]
+                    if abs(item.pos().x() - old_x) > 0.01 or abs(item.pos().y() - old_y) > 0.01:
+                        any_moved = True
+                        break
+                        
+            if any_moved:
+                # Temporarily revert all moved items to old positions to capture clean undo state
+                current_positions = {}
+                for item in self.scene().items():
+                    if hasattr(item, 'label_data') and item.label_data.id in initial_positions:
+                        current_positions[item.label_data.id] = (item.pos().x(), item.pos().y())
+                        old_x, old_y = initial_positions[item.label_data.id]
+                        item.setPos(old_x, old_y)
+                        item.label_data.update_position(old_x, old_y)
+                
+                # Save single atomic undo state
                 view.project.save_undo_state()
                 view.project.is_dirty = True
                 if hasattr(view.window(), 'update_window_title'):
                     view.window().update_window_title()
+                    
+                # Restore to final positions and update data model
+                for item in self.scene().items():
+                    if hasattr(item, 'label_data') and item.label_data.id in current_positions:
+                        final_x, final_y = current_positions[item.label_data.id]
+                        item.setPos(final_x, final_y)
+                        item.label_data.update_position(final_x, final_y)
+        else:
+            if hasattr(self, '_drag_start_pos') and self._drag_start_pos != new_pos:
+                self.label_data.update_position(new_pos.x(), new_pos.y())
                 
-            self.setPos(new_pos)
-            self.label_data.update_position(new_pos.x(), new_pos.y())
-            
         if self.position_changed_callback:
             self.position_changed_callback(self.label_data.id, new_pos.x(), new_pos.y())
 

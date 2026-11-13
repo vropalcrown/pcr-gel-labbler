@@ -1,10 +1,10 @@
 @echo off
 cd /d "%~dp0"
-python --version >nul 2>&1
+start "" pythonw run.py 2>nul
 if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Python is not found in PATH. Please run Install_Dependencies.bat first.
-    pause
-    exit /b 1
+    python run.py
+    if %ERRORLEVEL% NEQ 0 (
+        echo [ERROR] Python is not found in PATH.
+        pause
+    )
 )
-start "" pythonw run.py
-

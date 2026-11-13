@@ -4,8 +4,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QBrush
 
 from gel_labeler.core.project import GelProject
 from gel_labeler.gui.label_item import LabelItem
-from gel_labeler.gui.settings_dialog import SettingsDialog
-from gel_labeler.config import DEFAULT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_FONT_FAMILY
+from gel_labeler.config import DEFAULT_COLOR, DEFAULT_FONT_SIZE
 
 
 class GelCanvas(QGraphicsView):
@@ -26,7 +25,7 @@ class GelCanvas(QGraphicsView):
         # Configure View performance & behaviors
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -41,22 +40,9 @@ class GelCanvas(QGraphicsView):
         self.span_first_point = None
         self.temp_marker = None
         
-        # Ladder vertical annotation variables
-        self.ladder_mode = False
-        self.ladder_config = {}
-        self.ladder_first_point = None
-
         # 2-click alignment state variables
         self.align_mode = False
         self.align_first_point = None
-
-        # Grid overlay state variables
-        self.grid_enabled = False
-        self.grid_x_spacing = 40.0
-        self.grid_y_spacing = 40.0
-        self.grid_x_offset = 0.0
-        self.grid_y_offset = 0.0
-        self.grid_color = "#E29C3D"
 
 
     def load_project_image(self) -> bool:
@@ -88,11 +74,26 @@ class GelCanvas(QGraphicsView):
         self.fit_image_in_view()
         return True
 
-    def deferred_reload(self):
-        """Reloads the project image and notifies parent window safely after event loop returns."""
-        self.load_project_image()
+    def reload_labels(self):
+        """Reloads only the label items without clearing the pixmap or resetting view zoom/pan."""
+        for item in list(self.label_items.values()):
+            try:
+                self.scene.removeItem(item)
+            except Exception:
+                pass
+        self.label_items.clear()
+        self.populate_labels()
         if self.on_project_modified:
             self.on_project_modified()
+
+    def deferred_reload(self):
+        """Reloads labels without resetting view zoom/pan if the image is already loaded."""
+        if self.bg_pixmap_item is not None and not self.bg_pixmap_item.pixmap().isNull():
+            self.reload_labels()
+        else:
+            self.load_project_image()
+            if self.on_project_modified:
+                self.on_project_modified()
 
 
     def populate_labels(self):
@@ -112,11 +113,9 @@ class GelCanvas(QGraphicsView):
                 pass
             self.temp_marker = None
         self.span_mode = False
-        self.ladder_mode = False
         self.align_mode = False
         self.align_first_point = None
         self.span_first_point = None
-        self.ladder_first_point = None
         self.scene.clear()
         self.bg_pixmap_item = None
         self.label_items.clear()
@@ -211,51 +210,6 @@ class GelCanvas(QGraphicsView):
                 self.cancel_align_mode()
             return
 
-        # Handle Vertical Ladder Annotation Mode first
-        if self.ladder_mode:
-            if event.button() == Qt.MouseButton.LeftButton:
-                pos = event.position().toPoint()
-                scene_pos = self.mapToScene(pos)
-                
-                if self.ladder_first_point is None:
-                    self.ladder_first_point = scene_pos
-                    from PyQt6.QtGui import QPen, QBrush, QColor
-                    pen = QPen(QColor("#00E5FF"), 2) # Light blue marker
-                    brush = QBrush(QColor(0, 229, 255, 120))
-                    self.temp_marker = self.scene.addEllipse(
-                        scene_pos.x() - 6, scene_pos.y() - 6, 12, 12, pen, brush
-                    )
-                    if self.on_status_message:
-                        self.on_status_message("Ladder Mode: Click the bottom-most band of the ladder lane.")
-                else:
-                    pt1 = self.ladder_first_point
-                    pt2 = scene_pos
-                    
-                    if self.temp_marker:
-                        self.scene.removeItem(self.temp_marker)
-                        self.temp_marker = None
-                        
-                    self.project.generate_ladder_labels(
-                        bands=self.ladder_config.get("bands", []),
-                        x1=pt1.x(), y1=pt1.y(),
-                        x2=pt2.x(), y2=pt2.y(),
-                        alignment=self.ladder_config.get("alignment", "Left"),
-                        color=self.ladder_config.get("color", "#FFFFFF"),
-                        font_size=self.ladder_config.get("font_size", 10),
-                        rotation=self.ladder_config.get("rotation", 0.0),
-                        font_family="Arial"
-                    )
-                    
-                    self.ladder_mode = False
-                    self.setCursor(Qt.CursorShape.ArrowCursor)
-                    QTimer.singleShot(0, self.deferred_reload)
-                    
-                    if self.on_status_message:
-                        self.on_status_message("Successfully generated vertical ladder band annotations!")
-            elif event.button() == Qt.MouseButton.RightButton:
-                self.cancel_ladder_mode()
-            return
-
         # Handle Span Placement Mode first
         if self.span_mode:
             if event.button() == Qt.MouseButton.LeftButton:
@@ -293,7 +247,8 @@ class GelCanvas(QGraphicsView):
                         x2=pt2.x(), y2=pt2.y(),
                         color=self.span_config.get("color", DEFAULT_COLOR),
                         font_size=self.span_config.get("font_size", DEFAULT_FONT_SIZE),
-                        rotation=self.span_config.get("rotation", 0.0)
+                        rotation=self.span_config.get("rotation", 0.0),
+                        font_family=self.span_config.get("font_family", "Arial")
                     )
                     
                     self.span_mode = False
@@ -313,30 +268,6 @@ class GelCanvas(QGraphicsView):
             # Create a fake left click event for scroll hand drag to start immediately
             fake_event = event
             super().mousePressEvent(fake_event)
-        elif event.button() == Qt.MouseButton.LeftButton:
-            # Left click: Check what item is clicked
-            pos = event.position().toPoint()
-            clicked_item = self.itemAt(pos)
-            
-            # Allow QGraphicsView to handle normal dragging/selection of LabelItems
-            super().mousePressEvent(event)
-            
-            # If the user clicked empty space (i.e. background image or nothing), create a label
-            if clicked_item is None or clicked_item == self.bg_pixmap_item:
-                scene_pos = self.mapToScene(pos)
-                
-                # Get the click mode from parent MainWindow
-                click_mode = "Auto-Numbering"
-                if hasattr(self.window(), 'click_mode_combo'):
-                    click_mode = self.window().click_mode_combo.currentText()
-                
-                if "Disabled" in click_mode:
-                    return
-                elif "Quick Manual" in click_mode:
-
-                    self.prompt_quick_manual_label(scene_pos)
-                else:
-                    self.add_auto_number_label(scene_pos)
         else:
             super().mousePressEvent(event)
 
@@ -344,139 +275,107 @@ class GelCanvas(QGraphicsView):
         """Restores default modes when mouse button is released."""
         super().mouseReleaseEvent(event)
         if event.button() == Qt.MouseButton.MiddleButton:
-            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+
+    def mouseDoubleClickEvent(self, event):
+        """Double clicking on an empty area of the canvas prompts to create a new label at that position."""
+        if event.button() == Qt.MouseButton.LeftButton and self.bg_pixmap_item:
+            item_under_cursor = self.itemAt(event.position().toPoint())
+            # If the click was not on an existing label (it was on the background or empty scene)
+            if item_under_cursor is None or item_under_cursor == self.bg_pixmap_item:
+                scene_pos = self.mapToScene(event.position().toPoint())
+                self.prompt_add_label_at(scene_pos.x(), scene_pos.y())
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Shows canvas context menu when right-clicking on empty background."""
+        item_under_cursor = self.itemAt(event.pos())
+        if item_under_cursor is None or item_under_cursor == self.bg_pixmap_item:
+            scene_pos = self.mapToScene(event.pos())
+            from PyQt6.QtWidgets import QMenu
+            menu = QMenu(self)
+            
+            add_act = menu.addAction("➕ Add Label Here...")
+            menu.addSeparator()
+            span_act = menu.addAction("📏 Mark Well Boundaries...")
+            align_act = menu.addAction("🔄 Align Image (2-Click)...")
+            fit_act = menu.addAction("⛶ Fit Gel to Window")
+            menu.addSeparator()
+            
+            main_win = self.window()
+            has_clipboard = hasattr(main_win, 'clipboard_labels') and bool(main_win.clipboard_labels)
+            paste_act = menu.addAction("📋 Paste Labels")
+            paste_act.setEnabled(has_clipboard)
+            
+            clear_act = menu.addAction("🗑 Clear All Labels")
+            clear_act.setEnabled(bool(self.project.labels))
+            
+            action = menu.exec(event.globalPos())
+            if action == add_act:
+                self.prompt_add_label_at(scene_pos.x(), scene_pos.y())
+            elif action == span_act:
+                if hasattr(main_win, 'start_span_marking_dialog'):
+                    main_win.start_span_marking_dialog()
+            elif action == align_act:
+                self.enter_align_mode()
+            elif action == fit_act:
+                self.fit_image_in_view()
+            elif action == paste_act:
+                if hasattr(main_win, 'paste_labels'):
+                    main_win.paste_labels()
+            elif action == clear_act:
+                if hasattr(main_win, 'clear_labels_confirm'):
+                    main_win.clear_labels_confirm()
+            return
+            
+        super().contextMenuEvent(event)
+
+    def prompt_add_label_at(self, x: float, y: float):
+        """Opens SettingsDialog to add a label at the specified coordinates."""
+        if not self.bg_pixmap_item:
+            return
+            
+        from gel_labeler.gui.settings_dialog import SettingsDialog
+        
+        main_win = self.window()
+        color = getattr(main_win, 'default_label_color', DEFAULT_COLOR)
+        size = getattr(main_win, 'default_label_size', DEFAULT_FONT_SIZE)
+        font_family = getattr(main_win, 'default_label_font_family', "Arial")
+        
+        # Suggest next number if existing labels are numeric
+        default_text = "Lane 1"
+        all_labels = self.project.get_labels_list()
+        numeric_labels = []
+        for l in all_labels:
+            if l.text.isdigit():
+                numeric_labels.append(int(l.text))
+        if numeric_labels:
+            default_text = str(max(numeric_labels) + 1)
+            
+        dialog = SettingsDialog(parent=self, initial_text=default_text, initial_color=color, initial_font_size=size)
+        if dialog.exec() == SettingsDialog.DialogCode.Accepted:
+            text, col, sz, rot = dialog.get_values()
+            if text:
+                new_label = self.project.add_label(
+                    text=text,
+                    x=x,
+                    y=y,
+                    color=col,
+                    font_size=sz,
+                    font_family=font_family,
+                    rotation=rot
+                )
+                self.create_label_item(new_label)
+                if self.on_project_modified:
+                    self.on_project_modified()
+                if self.on_status_message:
+                    self.on_status_message(f"Added label '{text}' at ({int(x)}, {int(y)})")
 
 
 
     # --- Label CRUD Operations ---
-
-    def prompt_and_create_label(self, scene_pos: QPointF):
-        """Opens a SettingsDialog to prompt user for text, then creates the label."""
-        if not self.bg_pixmap_item:
-            return  # No image loaded
-            
-        parent = self.window()
-        initial_text = parent.next_edit.text().strip() if hasattr(parent, 'next_edit') else ""
-        initial_color = parent.default_label_color if hasattr(parent, 'default_label_color') else "#00FF00"
-        initial_font_size = parent.default_label_size if hasattr(parent, 'default_label_size') else 14
-        initial_rotation = parent.default_label_rotation if hasattr(parent, 'default_label_rotation') else 0.0
-        
-        dialog = SettingsDialog(
-            parent=self,
-            initial_text=initial_text,
-            initial_color=initial_color,
-            initial_font_size=initial_font_size,
-            initial_rotation=initial_rotation
-        )
-        if dialog.exec() == SettingsDialog.DialogCode.Accepted:
-            text, color, size, rotation = dialog.get_values()
-            
-            if text:
-                # Update default styles in MainWindow
-                if hasattr(parent, 'default_label_color'):
-                    parent.default_label_color = color
-                    parent.default_label_size = size
-                    parent.default_label_rotation = rotation
-                
-                # Add to project model (coordinates in original image pixel space)
-                font_family = parent.default_label_font_family if hasattr(parent, 'default_label_font_family') else DEFAULT_FONT_FAMILY
-                label = self.project.add_label(
-                    text=text,
-                    x=scene_pos.x(),
-                    y=scene_pos.y(),
-                    color=color,
-                    font_size=size,
-                    font_family=font_family,
-                    rotation=rotation
-                )
-                
-                # Update next label edit
-                if hasattr(parent, 'increment_next_label'):
-                    parent.increment_next_label(text)
-                
-                # Add graphical widget to scene
-                self.create_label_item(label)
-                
-                if self.on_project_modified:
-                    self.on_project_modified()
-                    
-                if self.on_status_message:
-                    self.on_status_message(f"Added label '{text}' at position ({int(scene_pos.x())}, {int(scene_pos.y())})")
-
-    def add_auto_number_label(self, scene_pos: QPointF):
-        """Immediately places a label with the incrementing value from MainWindow."""
-        parent = self.window()
-        next_text = parent.next_edit.text().strip() if hasattr(parent, 'next_edit') else "1"
-        if not next_text:
-            next_text = "1"
-            
-        color = parent.default_label_color if hasattr(parent, 'default_label_color') else "#00FF00"
-        size = parent.default_label_size if hasattr(parent, 'default_label_size') else 14
-        rotation = parent.default_label_rotation if hasattr(parent, 'default_label_rotation') else 0.0
-        
-        # Add to project model
-        font_family = parent.default_label_font_family if hasattr(parent, 'default_label_font_family') else DEFAULT_FONT_FAMILY
-        label = self.project.add_label(
-            text=next_text,
-            x=scene_pos.x(),
-            y=scene_pos.y(),
-            color=color,
-            font_size=size,
-            font_family=font_family,
-            rotation=rotation
-        )
-        
-        # Add graphical item
-        self.create_label_item(label)
-        
-        # Increment parent counter
-        if hasattr(parent, 'increment_next_label'):
-            parent.increment_next_label(next_text)
-            
-        if self.on_project_modified:
-            self.on_project_modified()
-        if self.on_status_message:
-            self.on_status_message(f"Auto-placed label '{next_text}'")
-
-    def prompt_quick_manual_label(self, scene_pos: QPointF):
-        """Opens a simplified prompt to enter text only."""
-        from PyQt6.QtWidgets import QInputDialog
-        parent = self.window()
-        default_text = parent.next_edit.text().strip() if hasattr(parent, 'next_edit') else "1"
-        
-        text, ok = QInputDialog.getText(
-            self, "Quick Label Entry", "Enter label text/number:",
-            text=default_text
-        )
-        
-        if ok and text.strip():
-            text = text.strip()
-            color = parent.default_label_color if hasattr(parent, 'default_label_color') else "#00FF00"
-            size = parent.default_label_size if hasattr(parent, 'default_label_size') else 14
-            rotation = parent.default_label_rotation if hasattr(parent, 'default_label_rotation') else 0.0
-            
-            # Add to project
-            font_family = parent.default_label_font_family if hasattr(parent, 'default_label_font_family') else DEFAULT_FONT_FAMILY
-            label = self.project.add_label(
-                text=text,
-                x=scene_pos.x(),
-                y=scene_pos.y(),
-                color=color,
-                font_size=size,
-                font_family=font_family,
-                rotation=rotation
-            )
-            
-            self.create_label_item(label)
-            
-            # Increment parent counter based on what they typed
-            if hasattr(parent, 'increment_next_label'):
-                parent.increment_next_label(text)
-                
-            if self.on_project_modified:
-                self.on_project_modified()
-            if self.on_status_message:
-                self.on_status_message(f"Placed label '{text}'")
 
     def create_label_item(self, label):
         """Helper to create and add a LabelItem to the graphics scene."""
@@ -665,7 +564,6 @@ class GelCanvas(QGraphicsView):
         
         # Cancel align modes
         self.cancel_align_mode()
-        self.cancel_ladder_mode()
         
         # Remove any pre-existing temp markers
         if self.temp_marker:
@@ -687,35 +585,6 @@ class GelCanvas(QGraphicsView):
         if self.on_status_message:
             self.on_status_message("Span placement cancelled.")
 
-    def enter_ladder_mode(self, config: dict):
-        """Enters interactive vertical ladder band annotation mode."""
-        self.ladder_mode = True
-        self.ladder_config = config
-        self.ladder_first_point = None
-        
-        # Cancel align and span modes
-        self.cancel_align_mode()
-        self.cancel_span_mode()
-        
-        if self.temp_marker:
-            self.scene.removeItem(self.temp_marker)
-            self.temp_marker = None
-            
-        self.setCursor(Qt.CursorShape.CrossCursor)
-        if self.on_status_message:
-            self.on_status_message("Ladder Mode: Click the top-most band of the ladder lane.")
-
-    def cancel_ladder_mode(self):
-        """Aborts interactive vertical ladder band placement."""
-        self.ladder_mode = False
-        self.ladder_first_point = None
-        if self.temp_marker:
-            self.scene.removeItem(self.temp_marker)
-            self.temp_marker = None
-        self.setCursor(Qt.CursorShape.ArrowCursor)
-        if self.on_status_message:
-            self.on_status_message("Ladder band placement cancelled.")
-
     def enter_align_mode(self):
         """Enters interactive 2-click alignment mode."""
         self.align_mode = True
@@ -726,7 +595,6 @@ class GelCanvas(QGraphicsView):
             
         # Cancel other modes
         self.cancel_span_mode()
-        self.cancel_ladder_mode()
         
         self.setCursor(Qt.CursorShape.CrossCursor)
         if self.on_status_message:
@@ -829,52 +697,4 @@ class GelCanvas(QGraphicsView):
             self.scene.update()
 
         event.accept()
-
-    def drawForeground(self, painter: QPainter, rect: QRectF):
-        super().drawForeground(painter, rect)
-        if not hasattr(self, 'grid_enabled') or not self.grid_enabled:
-            return
-            
-        scene_rect = self.sceneRect()
-        left = scene_rect.left()
-        top = scene_rect.top()
-        right = scene_rect.right()
-        bottom = scene_rect.bottom()
-        
-        painter.save()
-        
-        # Configure pen
-        from PyQt6.QtGui import QPen, QColor
-        color = QColor(self.grid_color)
-        pen = QPen(color)
-        pen.setWidth(1)
-        painter.setPen(pen)
-        
-        # Ensure spacing is not zero or extremely small to prevent infinite loops
-        x_spacing = max(5.0, self.grid_x_spacing)
-        y_spacing = max(5.0, self.grid_y_spacing)
-        
-        # Draw vertical lines
-        x_start = left + (self.grid_x_offset % x_spacing)
-        if x_start > left:
-            x_start -= x_spacing
-            
-        x = x_start
-        while x <= right:
-            if x >= left:
-                painter.drawLine(QPointF(x, top), QPointF(x, bottom))
-            x += x_spacing
-            
-        # Draw horizontal lines
-        y_start = top + (self.grid_y_offset % y_spacing)
-        if y_start > top:
-            y_start -= y_spacing
-            
-        y = y_start
-        while y <= bottom:
-            if y >= top:
-                painter.drawLine(QPointF(left, y), QPointF(right, y))
-            y += y_spacing
-            
-        painter.restore()
 

@@ -6,17 +6,67 @@ from typing import Optional
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                              QFileDialog, QMessageBox, QLabel,
                              QTabWidget, QDialog, QListWidget, QListWidgetItem,
-                             QPushButton, QCheckBox, QLineEdit)
-from PyQt6.QtCore import Qt, QTimer, QSize, QStandardPaths
-from PyQt6.QtGui import QAction, QImage, QPainter, QIcon
+                             QPushButton, QCheckBox, QLineEdit, QComboBox,
+                             QStackedWidget)
+from PyQt6.QtCore import Qt, QTimer, QSize, QStandardPaths, pyqtSignal
+from PyQt6.QtGui import QAction, QImage, QPainter, QIcon, QFont
 
 logger = logging.getLogger("gel_labeler")
 
 from gel_labeler.config import DARK_THEME_QSS, DEFAULT_COLOR
 from gel_labeler.core.project import GelProject
 from gel_labeler.gui.canvas import GelCanvas
-from gel_labeler.gui.grid_dialog import GridOverlayDialog
 from gel_labeler.gui.tab_widget import GelTabWidget
+from gel_labeler.gui.nav_rail import SuiteNavRail
+from gel_labeler.gui.master_mix_widget import MasterMixWidget
+from gel_labeler.gui.protocol_widget import ProtocolWidget
+from gel_labeler.gui.colony_counter_dialog import ColonyCounterWidget
+from gel_labeler.gui.plate_widget import PlateWidget
+
+
+class FastFontComboBox(QComboBox):
+    """Fast, lightweight font picker that avoids synchronous OS font registry scans at startup."""
+    currentFontChanged = pyqtSignal(QFont)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        # Pre-populate common bioinformatics & document fonts immediately
+        self.addItems([
+            "Arial", "Calibri", "Courier New", "Georgia", 
+            "Helvetica", "Impact", "Roboto", "Segoe UI", 
+            "Times New Roman", "Trebuchet MS", "Verdana"
+        ])
+        self.currentTextChanged.connect(self._handle_text_changed)
+        # Asynchronously load remaining system fonts after UI is already displayed
+        QTimer.singleShot(400, self._load_system_fonts)
+        
+    def _handle_text_changed(self, text: str):
+        self.currentFontChanged.emit(QFont(text))
+        
+    def currentFont(self) -> QFont:
+        return QFont(self.currentText())
+        
+    def setCurrentFont(self, font: QFont):
+        family = font.family()
+        idx = self.findText(family)
+        if idx >= 0:
+            self.setCurrentIndex(idx)
+        else:
+            self.addItem(family)
+            self.setCurrentText(family)
+            
+    def _load_system_fonts(self):
+        try:
+            from PyQt6.QtGui import QFontDatabase
+            current = set(self.itemText(i) for i in range(self.count()))
+            for family in sorted(QFontDatabase.families()):
+                if family not in current:
+                    self.addItem(family)
+                    current.add(family)
+        except Exception:
+            pass
+
 
 class PptxTabItemWidget(QWidget):
     """Custom widget for a tab item in the PowerPoint export dialog containing a checkbox, tab name, and custom title input."""
@@ -110,7 +160,7 @@ class PptxExportDialog(QDialog):
             tab_name = self.tab_widget.tabText(idx).replace("📁 ", "")
             
             # Show image size or "(Empty Tab)"
-            if tab.project.image_path:
+            if tab and getattr(tab, 'project', None) and tab.project.image_path:
                 details = f" ({tab.project.image_width}x{tab.project.image_height} px)"
             else:
                 details = " (Empty)"
@@ -296,11 +346,6 @@ class MainWindow(QMainWindow):
     def canvas(self) -> Optional[GelCanvas]:
         tab = self.active_tab
         return tab.canvas if tab else None
-
-    @property
-    def profile_panel(self) -> Optional[QWidget]:
-        tab = self.active_tab
-        return tab.profile_panel if tab else None
         
     @property
     def default_label_color(self) -> str:
@@ -365,20 +410,42 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Gel Labeler")
         self.resize(1024, 768)
         
-        # Set window icon
-        logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
-        if os.path.exists(logo_path):
-            self.setWindowIcon(QIcon(logo_path))
+        # Set window icon (loads multi-resolution .ico and high-res .png for taskbar & titlebar)
+        gui_dir = os.path.dirname(__file__)
+        p_ico = os.path.join(gui_dir, "logo.ico")
+        p_png = os.path.join(gui_dir, "logo.png")
+        win_icon = QIcon()
+        if os.path.exists(p_ico):
+            win_icon.addFile(p_ico)
+        if os.path.exists(p_png):
+            win_icon.addFile(p_png)
+        if not win_icon.isNull():
+            self.setWindowIcon(win_icon)
             
-        # Apply premium dark theme
-        self.setStyleSheet(DARK_THEME_QSS)
-        
         # Initialize the QTabWidget first
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
         self.tab_widget.currentChanged.connect(self.handle_tab_changed)
         self.tab_widget.tabBarDoubleClicked.connect(self.rename_tab_dialog)
+        
+        # Initialize Suite Applications
+        self.master_mix_widget = MasterMixWidget(self)
+        self.protocol_widget = ProtocolWidget(self)
+        self.colony_counter_widget = ColonyCounterWidget(self)
+        self.plate_widget = PlateWidget(self)
+        
+        # Setup Central Stacked Widget
+        self.stacked_widget = QStackedWidget(self)
+        self.stacked_widget.addWidget(self.tab_widget)              # 0: Gel Labeler
+        self.stacked_widget.addWidget(self.master_mix_widget)        # 1: Master Mixer
+        self.stacked_widget.addWidget(self.protocol_widget)          # 2: Protocols
+        self.stacked_widget.addWidget(self.colony_counter_widget)    # 3: Colony Counter
+        self.stacked_widget.addWidget(self.plate_widget)             # 4: Plate Designer
+        
+        # Left Navigation Rail
+        self.nav_rail = SuiteNavRail(self)
+        self.nav_rail.page_changed.connect(self.switch_suite_page)
         
         # Setup background auto-save timer running every 2 minutes (120,000 ms)
         self.autosave_timer = QTimer(self)
@@ -388,34 +455,6 @@ class MainWindow(QMainWindow):
         
         # Check and recover session after window is initialized
         QTimer.singleShot(100, self.check_and_recover_session)
-        
-        # Style QTabWidget with Blender QSS
-        self.tab_widget.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #151515;
-                background-color: #282828;
-            }
-            QTabBar::tab {
-                background-color: #1e1e1e;
-                color: #cfcfcf;
-                border: 1px solid #151515;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 6px 12px;
-                min-width: 85px;
-            }
-            QTabBar::tab:selected {
-                background-color: #282828;
-                border-color: #151515;
-                color: #e29c3d; /* Blender Orange */
-                font-weight: bold;
-            }
-            QTabBar::tab:hover {
-                background-color: #333333;
-                color: #ffffff;
-            }
-        """)
         
         # Create core UI parts
         self.init_ui()
@@ -427,17 +466,67 @@ class MainWindow(QMainWindow):
         
         self.update_window_title()
 
+        # Apply dark theme stylesheet once after all widgets are built
+        self.setStyleSheet(DARK_THEME_QSS)
+
     def init_ui(self):
-        """Initializes the central widget and layout."""
-        self.setCentralWidget(self.tab_widget)
+        """Initializes the central widget and suite layout."""
+        suite_container = QWidget(self)
+        suite_layout = QHBoxLayout(suite_container)
+        suite_layout.setContentsMargins(0, 0, 0, 0)
+        suite_layout.setSpacing(0)
+        suite_layout.addWidget(self.nav_rail)
+        suite_layout.addWidget(self.stacked_widget, stretch=1)
+        self.setCentralWidget(suite_container)
         
         # Set up Status Bar
         self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Ready. Load an image to start labeling.")
+        self.status_bar.showMessage("Ready. Load an image or select a suite tool from the sidebar.")
         
-        # Coordinate display in status bar
+        # Coordinate display in status bar (deferred to idle tick to avoid blocking window show)
         self.coord_label = QLabel("")
-        self.status_bar.addPermanentWidget(self.coord_label)
+        QTimer.singleShot(0, lambda: self.status_bar.addPermanentWidget(self.coord_label))
+
+    def switch_suite_page(self, page_index: int):
+        """Switches the active application in the Molecular Biology Suite."""
+        self.stacked_widget.setCurrentIndex(page_index)
+        self.nav_rail.set_active_page(page_index)
+        
+        if page_index == 0:
+            if hasattr(self, 'operations_toolbar'):
+                self.operations_toolbar.setVisible(True)
+            if hasattr(self, 'style_toolbar'):
+                self.style_toolbar.setVisible(True)
+            self.update_window_title()
+            self.show_status_message("Switched to Gel Labeler workspace.")
+        elif page_index == 1:
+            if hasattr(self, 'operations_toolbar'):
+                self.operations_toolbar.setVisible(False)
+            if hasattr(self, 'style_toolbar'):
+                self.style_toolbar.setVisible(False)
+            self.setWindowTitle("Master Mixer — Reaction Recipe Calculator — Gel Labeler Suite")
+            self.show_status_message("Switched to Master Mix Reaction Calculator.")
+        elif page_index == 2:
+            if hasattr(self, 'operations_toolbar'):
+                self.operations_toolbar.setVisible(False)
+            if hasattr(self, 'style_toolbar'):
+                self.style_toolbar.setVisible(False)
+            self.setWindowTitle("Lab Protocols & SOP Runner — Gel Labeler Suite")
+            self.show_status_message("Switched to Lab Protocols & SOP Runner.")
+        elif page_index == 3:
+            if hasattr(self, 'operations_toolbar'):
+                self.operations_toolbar.setVisible(False)
+            if hasattr(self, 'style_toolbar'):
+                self.style_toolbar.setVisible(False)
+            self.setWindowTitle("AI Vision Colony & Seed Counter — Gel Labeler Suite")
+            self.show_status_message("Switched to AI Vision Colony & Seed Counter.")
+        elif page_index == 4:
+            if hasattr(self, 'operations_toolbar'):
+                self.operations_toolbar.setVisible(False)
+            if hasattr(self, 'style_toolbar'):
+                self.style_toolbar.setVisible(False)
+            self.setWindowTitle("Multiwell Plate Designer & Labeler — Gel Labeler Suite")
+            self.show_status_message("Switched to Multiwell Plate Designer & Labeler.")
 
     def create_menus(self):
         """Creates the menu bar items."""
@@ -528,39 +617,39 @@ class MainWindow(QMainWindow):
         align_labels_menu = edit_menu.addMenu("Align Labels")
         
         self.align_left_act = QAction("Align Left", self)
-        self.align_left_act.triggered.connect(lambda: self.canvas.align_selected_labels("Left"))
+        self.align_left_act.triggered.connect(lambda: self.canvas.align_selected_labels("Left") if self.canvas else None)
         align_labels_menu.addAction(self.align_left_act)
         
         self.align_center_act = QAction("Align Center (Horizontal)", self)
-        self.align_center_act.triggered.connect(lambda: self.canvas.align_selected_labels("Center"))
+        self.align_center_act.triggered.connect(lambda: self.canvas.align_selected_labels("Center") if self.canvas else None)
         align_labels_menu.addAction(self.align_center_act)
         
         self.align_right_act = QAction("Align Right", self)
-        self.align_right_act.triggered.connect(lambda: self.canvas.align_selected_labels("Right"))
+        self.align_right_act.triggered.connect(lambda: self.canvas.align_selected_labels("Right") if self.canvas else None)
         align_labels_menu.addAction(self.align_right_act)
         
         align_labels_menu.addSeparator()
         
         self.align_top_act = QAction("Align Top", self)
-        self.align_top_act.triggered.connect(lambda: self.canvas.align_selected_labels("Top"))
+        self.align_top_act.triggered.connect(lambda: self.canvas.align_selected_labels("Top") if self.canvas else None)
         align_labels_menu.addAction(self.align_top_act)
         
         self.align_middle_act = QAction("Align Middle (Vertical)", self)
-        self.align_middle_act.triggered.connect(lambda: self.canvas.align_selected_labels("Middle"))
+        self.align_middle_act.triggered.connect(lambda: self.canvas.align_selected_labels("Middle") if self.canvas else None)
         align_labels_menu.addAction(self.align_middle_act)
         
         self.align_bottom_act = QAction("Align Bottom", self)
-        self.align_bottom_act.triggered.connect(lambda: self.canvas.align_selected_labels("Bottom"))
+        self.align_bottom_act.triggered.connect(lambda: self.canvas.align_selected_labels("Bottom") if self.canvas else None)
         align_labels_menu.addAction(self.align_bottom_act)
         
         align_labels_menu.addSeparator()
         
         self.dist_horiz_act = QAction("Distribute Horizontally", self)
-        self.dist_horiz_act.triggered.connect(lambda: self.canvas.align_selected_labels("DistributeHorizontally"))
+        self.dist_horiz_act.triggered.connect(lambda: self.canvas.align_selected_labels("DistributeHorizontally") if self.canvas else None)
         align_labels_menu.addAction(self.dist_horiz_act)
         
         self.dist_vert_act = QAction("Distribute Vertically", self)
-        self.dist_vert_act.triggered.connect(lambda: self.canvas.align_selected_labels("DistributeVertically"))
+        self.dist_vert_act.triggered.connect(lambda: self.canvas.align_selected_labels("DistributeVertically") if self.canvas else None)
         align_labels_menu.addAction(self.dist_vert_act)
 
 
@@ -573,25 +662,10 @@ class MainWindow(QMainWindow):
         fit_action.triggered.connect(lambda: self.canvas.fit_image_in_view() if self.canvas else None)
         view_menu.addAction(fit_action)
         
-        grid_action = QAction("Grid Overlay Settings...", self)
-        grid_action.setShortcut("Ctrl+G")
-        grid_action.triggered.connect(self.open_grid_dialog)
-        view_menu.addAction(grid_action)
-        
         span_action = QAction("Mark Well Boundaries...", self)
         span_action.setShortcut("Ctrl+B")
         span_action.triggered.connect(self.start_span_marking_dialog)
         view_menu.addAction(span_action)
-        
-        ladder_action = QAction("Label Ladder Bands...", self)
-        ladder_action.setShortcut("Ctrl+Shift+L")
-        ladder_action.triggered.connect(self.start_ladder_marking_dialog)
-        view_menu.addAction(ladder_action)
-        
-        align_action = QAction("Align Everything", self)
-        align_action.setShortcut("Ctrl+Shift+A")
-        align_action.triggered.connect(self.align_everything)
-        view_menu.addAction(align_action)
         
         select_all_action = QAction("Select All Labels", self)
         select_all_action.setShortcut("Ctrl+A")
@@ -602,20 +676,33 @@ class MainWindow(QMainWindow):
         clear_action.triggered.connect(self.clear_labels_confirm)
         view_menu.addAction(clear_action)
         
-        view_menu.addSeparator()
-        self.profile_toggle_act = QAction("Show Lane Profile Panel", self)
-        self.profile_toggle_act.setCheckable(True)
-        self.profile_toggle_act.setChecked(True)
-        self.profile_toggle_act.setShortcut("Ctrl+P")
-        self.profile_toggle_act.triggered.connect(self.toggle_profile_panel)
-        view_menu.addAction(self.profile_toggle_act)
-        
         # --- Tools / Modules Menu ---
         tools_menu = menubar.addMenu("Tools")
-        colony_action = QAction("🧫 AI Colony & Seed Counter...", self)
-        colony_action.setShortcut("Ctrl+Shift+C")
-        colony_action.triggered.connect(self.open_colony_counter_dialog)
+        
+        gel_action = QAction("🧬 Gel Electrophoresis Labeler", self)
+        gel_action.setShortcut("Ctrl+1")
+        gel_action.triggered.connect(lambda: self.switch_suite_page(0))
+        tools_menu.addAction(gel_action)
+        
+        mm_action = QAction("🧪 Master Mix Reaction Calculator", self)
+        mm_action.setShortcut("Ctrl+2")
+        mm_action.triggered.connect(lambda: self.switch_suite_page(1))
+        tools_menu.addAction(mm_action)
+        
+        proto_action = QAction("📋 Lab Protocols & SOP Runner", self)
+        proto_action.setShortcut("Ctrl+3")
+        proto_action.triggered.connect(lambda: self.switch_suite_page(2))
+        tools_menu.addAction(proto_action)
+        
+        colony_action = QAction("🧫 AI Colony & Seed Counter", self)
+        colony_action.setShortcut("Ctrl+4")
+        colony_action.triggered.connect(lambda: self.switch_suite_page(3))
         tools_menu.addAction(colony_action)
+        
+        plate_action = QAction("▦ Multiwell Plate Designer & Labeler", self)
+        plate_action.setShortcut("Ctrl+5")
+        plate_action.triggered.connect(lambda: self.switch_suite_page(4))
+        tools_menu.addAction(plate_action)
         
         # --- Help Menu ---
         help_menu = menubar.addMenu("Help")
@@ -628,6 +715,7 @@ class MainWindow(QMainWindow):
         # --- Row 1: Operations Toolbar ---
         toolbar = self.addToolBar("Operations")
         toolbar.setMovable(False)
+        self.operations_toolbar = toolbar
         
         # Open Image Button
         open_btn = QAction("📂", self)
@@ -645,9 +733,15 @@ class MainWindow(QMainWindow):
         
         # Colony Counter Tool Button
         colony_btn = QAction("🧫", self)
-        colony_btn.setToolTip("AI Colony & Seed Counter (Ctrl+Shift+C)")
-        colony_btn.triggered.connect(self.open_colony_counter_dialog)
+        colony_btn.setToolTip("AI Colony & Seed Counter (Ctrl+4)")
+        colony_btn.triggered.connect(lambda: self.switch_suite_page(3))
         toolbar.addAction(colony_btn)
+        
+        # Multiwell Plate Tool Button
+        plate_btn = QAction("▦", self)
+        plate_btn.setToolTip("Multiwell Plate Designer & Labeler (Ctrl+5)")
+        plate_btn.triggered.connect(lambda: self.switch_suite_page(4))
+        toolbar.addAction(plate_btn)
         
         # Fit View Button
         fit_btn = QAction("⛶", self)
@@ -655,35 +749,17 @@ class MainWindow(QMainWindow):
         fit_btn.triggered.connect(lambda: self.canvas.fit_image_in_view() if self.canvas else None)
         toolbar.addAction(fit_btn)
         
-        # Generate Grid Button
-        grid_btn = QAction("▦", self)
-        grid_btn.setToolTip("Grid Overlay Settings (Ctrl+G)")
-        grid_btn.triggered.connect(self.open_grid_dialog)
-        toolbar.addAction(grid_btn)
-        
         # Mark Span Button
         span_btn = QAction("📏", self)
         span_btn.setToolTip("Mark Well Boundaries (Ctrl+B)")
         span_btn.triggered.connect(self.start_span_marking_dialog)
         toolbar.addAction(span_btn)
         
-        # Label Ladder Button
-        ladder_btn = QAction("🪜", self)
-        ladder_btn.setToolTip("Label Ladder Bands (Ctrl+Shift+L)")
-        ladder_btn.triggered.connect(self.start_ladder_marking_dialog)
-        toolbar.addAction(ladder_btn)
-        
         # Select All Button
         select_all_btn = QAction("☑", self)
         select_all_btn.setToolTip("Select all active labels (Ctrl+A)")
         select_all_btn.triggered.connect(self.select_all_labels)
         toolbar.addAction(select_all_btn)
-        
-        # Align Everything Button
-        align_btn = QAction("🎯", self)
-        align_btn.setToolTip("Align all horizontal tiers and vertical ladders between their endpoints (Ctrl+Shift+A)")
-        align_btn.triggered.connect(self.align_everything)
-        toolbar.addAction(align_btn)
         
         # Align Labels Dropdown Button on Toolbar
         from PyQt6.QtWidgets import QToolButton, QMenu
@@ -734,57 +810,16 @@ class MainWindow(QMainWindow):
         align_toolbar_btn.triggered.connect(self.trigger_align_mode)
         toolbar.addAction(align_toolbar_btn)
         
-        # Profile Toggle Button
-        self.profile_toolbar_btn = QAction("📊", self)
-        self.profile_toolbar_btn.setCheckable(True)
-        visible = self.profile_panel.isVisible() if self.profile_panel else True
-        self.profile_toolbar_btn.setChecked(visible)
-        self.profile_toolbar_btn.setToolTip("Toggle Lane Profile Viewer (Ctrl+P)")
-        self.profile_toolbar_btn.triggered.connect(self.toggle_profile_panel)
-        toolbar.addAction(self.profile_toolbar_btn)
-        
         # Add a toolbar break to start a new row
         self.addToolBarBreak()
         
         # --- Row 2: Styling & Export Toolbar ---
         style_toolbar = self.addToolBar("Style & Export")
         style_toolbar.setMovable(False)
-        
-        # Click Mode Selection
-        from PyQt6.QtWidgets import QComboBox, QLineEdit
-        
-        mode_lbl = QLabel(" 🖱 ")
-        mode_lbl.setStyleSheet("color: #cfcfcf; font-weight: bold; font-size: 14px;")
-        mode_lbl.setToolTip("Click Placement Mode")
-        style_toolbar.addWidget(mode_lbl)
-        
-        self.click_mode_combo = QComboBox()
-        self.click_mode_combo.addItems(["🚫 Disabled", "🔢 Auto-Numbering", "✍️ Quick Manual"])
-        self.click_mode_combo.setToolTip(
-            "Auto-Numbering: Place incrementing labels immediately on click\n"
-            "Quick Manual: Show small text box on click\n"
-            "Disabled: Disable click-to-place labels entirely"
-        )
-        style_toolbar.addWidget(self.click_mode_combo)
-        self.click_mode_combo.currentTextChanged.connect(self.handle_click_mode_changed)
-        self.handle_click_mode_changed(self.click_mode_combo.currentText())
-        
-        next_lbl = QLabel(" ✍ ")
-        next_lbl.setStyleSheet("color: #cfcfcf; font-weight: bold; font-size: 14px;")
-        next_lbl.setToolTip("Next placed label text/number (increments automatically)")
-        style_toolbar.addWidget(next_lbl)
-        
-        self.next_edit = QLineEdit()
-        self.next_edit.setText("1")
-        self.next_edit.setFixedWidth(60)
-        self.next_edit.setToolTip("The text/number that will be placed next (auto-increments on click)")
-        self.next_edit.textChanged.connect(self.handle_next_edit_changed)
-        style_toolbar.addWidget(self.next_edit)
-        
-        style_toolbar.addSeparator()
+        self.style_toolbar = style_toolbar
         
         # Font family combo
-        from PyQt6.QtWidgets import QFontComboBox, QSpinBox
+        from PyQt6.QtWidgets import QSpinBox
         from PyQt6.QtGui import QFont
         
         font_lbl = QLabel(" 🔤 ")
@@ -792,7 +827,7 @@ class MainWindow(QMainWindow):
         font_lbl.setToolTip("Font Family")
         style_toolbar.addWidget(font_lbl)
         
-        self.font_combo = QFontComboBox()
+        self.font_combo = FastFontComboBox()
         self.font_combo.setFixedWidth(120)
         self.font_combo.setCurrentFont(QFont("Arial"))
         self.font_combo.currentFontChanged.connect(self.change_selected_labels_font_family)
@@ -833,11 +868,14 @@ class MainWindow(QMainWindow):
             color_hex = col_data["value"]
             btn = QPushButton()
             btn.setFixedSize(18, 18)
+            border_color = "#FFFFFF" if color_hex.upper() == "#000000" else "#000000"
+            is_active = (color_hex.upper() == self.default_label_color.upper())
+            border_style = f"2px solid {border_color}" if is_active else "1px solid #3A3A4A"
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {color_hex};
-                    border: 1px solid #2b2b2b;
-                    border-radius: 9px;  /* Circle */
+                    border: {border_style};
+                    border-radius: 9px;
                 }}
                 QPushButton:hover {{
                     border-color: #FFFFFF;
@@ -850,8 +888,6 @@ class MainWindow(QMainWindow):
             self.toolbar_color_buttons.append((color_hex, btn))
             
         style_toolbar.addWidget(color_container)
-        self.update_toolbar_color_highlight(self.default_label_color)
-        
         style_toolbar.addSeparator()
         
         # Export Image Button
@@ -885,18 +921,6 @@ class MainWindow(QMainWindow):
         tab.canvas.scene.selectionChanged.connect(self.update_selection_status)
         tab.canvas.setMouseTracking(True)
         
-        # Sync initial click mode and drag settings from main toolbar if available
-        if hasattr(self, 'click_mode_combo'):
-            tab.click_mode = self.click_mode_combo.currentText()
-            from PyQt6.QtWidgets import QGraphicsView
-            if "Disabled" in tab.click_mode:
-                tab.canvas.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-            else:
-                tab.canvas.setDragMode(QGraphicsView.DragMode.NoDrag)
-                
-        if hasattr(self, 'next_edit'):
-            tab.next_label_text = self.next_edit.text()
-            
         self.tab_widget.addTab(tab, f"📁 {name}")
         self.tab_widget.setCurrentWidget(tab)
         return tab
@@ -1027,17 +1051,7 @@ class MainWindow(QMainWindow):
             # Connect signals
             tab.canvas.scene.selectionChanged.connect(self.update_selection_status)
             tab.canvas.setMouseTracking(True)
-            if hasattr(self, 'click_mode_combo'):
-                tab.click_mode = self.click_mode_combo.currentText()
-                from PyQt6.QtWidgets import QGraphicsView
-                if "Disabled" in tab.click_mode:
-                    tab.canvas.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-                else:
-                    tab.canvas.setDragMode(QGraphicsView.DragMode.NoDrag)
-                    
-            if hasattr(self, 'next_edit'):
-                tab.next_label_text = self.next_edit.text()
-                
+            
             # Restore project details
             img_path = tab_data.get("image_path", None)
             if img_path and os.path.exists(img_path):
@@ -1050,7 +1064,6 @@ class MainWindow(QMainWindow):
                 lbl = GelLabel.from_dict(label_data)
                 tab.project.labels[lbl.id] = lbl
                 
-            tab.profile_panel.set_project(tab.project)
             tab.canvas.load_project_image()
             
             self.tab_widget.addTab(tab, raw_name)
@@ -1117,16 +1130,6 @@ class MainWindow(QMainWindow):
             return
             
         # Block signals to prevent triggering updates while setting widget values
-        if hasattr(self, 'click_mode_combo'):
-            self.click_mode_combo.blockSignals(True)
-            self.click_mode_combo.setCurrentText(tab.click_mode)
-            self.click_mode_combo.blockSignals(False)
-            
-        if hasattr(self, 'next_edit'):
-            self.next_edit.blockSignals(True)
-            self.next_edit.setText(tab.next_label_text)
-            self.next_edit.blockSignals(False)
-            
         if hasattr(self, 'font_combo'):
             self.font_combo.blockSignals(True)
             from PyQt6.QtGui import QFont
@@ -1141,24 +1144,12 @@ class MainWindow(QMainWindow):
         # Update color swatch highlights
         self.update_toolbar_color_highlight(tab.default_label_color)
         
-        # Sync profile toggle action state
-        self.sync_profile_button_state()
-        
-        # Sync grid overlay dialog settings
-        if hasattr(self, '_grid_overlay_dialog') and self._grid_overlay_dialog:
-            self._grid_overlay_dialog.update_for_active_canvas()
-        
         # Update window title and status
         self.update_window_title()
-        if tab.project.image_path:
+        if tab.project and tab.project.image_path:
             self.show_status_message(f"Switched to: {os.path.basename(tab.project.image_path)}")
         else:
             self.show_status_message("Switched to empty tab.")
-
-    def handle_next_edit_changed(self, text: str):
-        tab = self.active_tab
-        if tab:
-            tab.next_label_text = text
 
     def open_image_dialog(self):
         """Prompts user to select one or multiple gel images and loads them into tabs."""
@@ -1194,7 +1185,6 @@ class MainWindow(QMainWindow):
                 
             tab.project.reset()
             tab.project.load_image(file_path, reader.width(), reader.height())
-            tab.profile_panel.set_project(tab.project)
             
             # Rename tab to image filename
             t_idx = self.tab_widget.indexOf(tab)
@@ -1255,7 +1245,6 @@ class MainWindow(QMainWindow):
                 
             tab.project.reset()
             tab.project.load_image(file_path, reader.width(), reader.height())
-            tab.profile_panel.set_project(tab.project)
             
             t_idx = self.tab_widget.indexOf(tab)
             if t_idx >= 0:
@@ -1268,34 +1257,13 @@ class MainWindow(QMainWindow):
         self.show_status_message(f"Successfully loaded {len(img_files)} gel image(s) from folder.")
         self.update_window_title()
 
-
-    def open_grid_dialog(self):
-        """Spawns the modeless GridOverlayDialog to configure reference grid lines."""
-        if not self.active_tab or not self.active_tab.project.image_path:
-            QMessageBox.warning(self, "No Image", "Please load a gel image before enabling the grid overlay.")
-            return
-            
-        if hasattr(self, '_grid_overlay_dialog') and self._grid_overlay_dialog:
-            self._grid_overlay_dialog.raise_()
-            self._grid_overlay_dialog.activateWindow()
-            return
-            
-        self._grid_overlay_dialog = GridOverlayDialog(self)
-        self._grid_overlay_dialog.finished.connect(self.handle_grid_dialog_closed)
-        self._grid_overlay_dialog.show()
-
-    def handle_grid_dialog_closed(self):
-        self._grid_overlay_dialog = None
-
     def open_colony_counter_dialog(self):
-        """Launches the standalone AI Vision Colony & Seed Counter dialog."""
-        from gel_labeler.gui.colony_counter_dialog import ColonyCounterDialog
-        dialog = ColonyCounterDialog(self)
-        dialog.exec()
+        """Switches to the AI Vision Colony & Seed Counter application."""
+        self.switch_suite_page(3)
 
     def start_span_marking_dialog(self):
         """Opens config dialog and starts interactive 2-click span marking."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path or not self.canvas:
             QMessageBox.warning(self, "No Image", "Please load a gel image before defining boundaries.")
             return
             
@@ -1305,7 +1273,7 @@ class MainWindow(QMainWindow):
             def __init__(self, parent=None):
                 super().__init__(parent)
                 self.setWindowTitle("Mark Deck Span")
-                self.setStyleSheet(parent.styleSheet())  # Inherit styling
+                self.setStyleSheet(parent.styleSheet() if parent else "")  # Inherit styling
                 layout = QFormLayout(self)
                 layout.setSpacing(12)
                 layout.setContentsMargins(16, 16, 16, 16)
@@ -1330,7 +1298,8 @@ class MainWindow(QMainWindow):
                 
                 self.size_spin = QSpinBox()
                 self.size_spin.setRange(8, 72)
-                self.size_spin.setValue(12)
+                initial_size = getattr(parent, "default_label_size", 12) if parent else 12
+                self.size_spin.setValue(initial_size)
                 layout.addRow("Font Size (px):", self.size_spin)
                 
                 btn_layout = QHBoxLayout()
@@ -1359,10 +1328,13 @@ class MainWindow(QMainWindow):
                 from gel_labeler.core.pattern_parser import parse_label_pattern
                 pattern = self.pattern_input.text().strip()
                 labels = parse_label_pattern(pattern)
+                color = getattr(self.parent(), "default_label_color", DEFAULT_COLOR)
+                font_family = getattr(self.parent(), "default_label_font_family", "Arial")
                 return {
                     "name": self.tier_combo.currentText(),
                     "labels": labels,
-                    "color": DEFAULT_COLOR,  # Default color from config
+                    "color": color,
+                    "font_family": font_family,
                     "font_size": self.size_spin.value(),
                     "rotation": self.get_selected_rotation()
                 }
@@ -1372,111 +1344,9 @@ class MainWindow(QMainWindow):
             config = dialog.get_config()
             self.canvas.enter_span_mode(config)
 
-    def start_ladder_marking_dialog(self):
-        """Opens configuration dialog and enters interactive ladder labeling mode."""
-        if not self.project.image_path:
-            QMessageBox.warning(self, "No Image", "Please load a gel image before annotating a ladder.")
-            return
-            
-        from PyQt6.QtWidgets import QDialog, QComboBox, QFormLayout, QLineEdit, QPushButton, QSpinBox
-        
-        class LadderConfigDialog(QDialog):
-            def __init__(self, parent=None):
-                super().__init__(parent)
-                self.setWindowTitle("Label Ladder Bands")
-                self.setStyleSheet(parent.styleSheet())
-                layout = QFormLayout(self)
-                layout.setSpacing(12)
-                layout.setContentsMargins(16, 16, 16, 16)
-                
-                self.ladder_combo = QComboBox()
-                self.ladder_combo.addItems([
-                    "100bp Ladder (100bp - 1000bp)",
-                    "1kb Ladder (250bp - 10kb)",
-                    "Custom (Comma-separated)"
-                ])
-                layout.addRow("Ladder Preset:", self.ladder_combo)
-                
-                self.custom_input = QLineEdit()
-                self.custom_input.setPlaceholderText("e.g. 1000, 500, 200, 100")
-                self.custom_input.setEnabled(False)
-                layout.addRow("Custom Sizes:", self.custom_input)
-                
-                self.ladder_combo.currentIndexChanged.connect(self.toggle_custom)
-                
-                self.align_combo = QComboBox()
-                self.align_combo.addItems(["Left", "Right"])
-                layout.addRow("Alignment:", self.align_combo)
-                
-                self.size_spin = QSpinBox()
-                self.size_spin.setRange(6, 24)
-                self.size_spin.setValue(10)
-                layout.addRow("Font Size (px):", self.size_spin)
-                
-                self.rot_combo = QComboBox()
-                self.rot_combo.addItems([
-                    "0° (Horizontal)",
-                    "90° (Vertical Down)",
-                    "270° (Vertical Up)",
-                    "45° (Slanted)"
-                ])
-                self.rot_combo.setCurrentIndex(2)
-                layout.addRow("Text Rotation:", self.rot_combo)
-                
-                btn_layout = QHBoxLayout()
-                self.cancel_btn = QPushButton("❌ Cancel")
-                self.cancel_btn.clicked.connect(self.reject)
-                self.ok_btn = QPushButton("🚀 Start Marking")
-                self.ok_btn.setObjectName("primaryBtn")
-                self.ok_btn.clicked.connect(self.accept)
-                
-                btn_layout.addStretch()
-                btn_layout.addWidget(self.cancel_btn)
-                btn_layout.addWidget(self.ok_btn)
-                layout.addRow(btn_layout)
-                
-            def toggle_custom(self, idx):
-                self.custom_input.setEnabled(idx == 2)
-                
-            def get_bands(self) -> list:
-                idx = self.ladder_combo.currentIndex()
-                if idx == 0:
-                    return ["1000bp", "900bp", "800bp", "700bp", "600bp", "500bp", "400bp", "300bp", "200bp", "100bp"]
-                elif idx == 1:
-                    return ["10kb", "8kb", "6kb", "5kb", "4kb", "3kb", "2.5kb", "2kb", "1.5kb", "1kb", "750bp", "500bp", "250bp"]
-                else:
-                    text = self.custom_input.text().strip()
-                    if not text:
-                        return ["Band"]
-                    return [b.strip() for b in text.split(",") if b.strip()]
-                    
-            def get_selected_rotation(self) -> float:
-                idx = self.rot_combo.currentIndex()
-                if idx == 1:
-                    return 90.0
-                elif idx == 2:
-                    return 270.0
-                elif idx == 3:
-                    return 45.0
-                return 0.0
-                
-            def get_config(self) -> dict:
-                return {
-                    "bands": self.get_bands(),
-                    "alignment": self.align_combo.currentText(),
-                    "color": "#FFFFFF",  # Pure white looks best for ladder annotations next to lanes
-                    "font_size": self.size_spin.value(),
-                    "rotation": self.get_selected_rotation()
-                }
-                
-        dialog = LadderConfigDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            config = dialog.get_config()
-            self.canvas.enter_ladder_mode(config)
-
     def export_image_dialog(self):
         """Saves the graphical canvas directly into image pixels (high quality)."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path or not self.canvas:
             QMessageBox.warning(self, "No Image", "Please load a gel image before exporting.")
             return
             
@@ -1519,7 +1389,7 @@ class MainWindow(QMainWindow):
 
     def save_json_dialog(self):
         """Saves the label coordinates and properties database as JSON."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path:
             QMessageBox.warning(self, "No Image", "Please load a gel image before saving label data.")
             return
             
@@ -1539,7 +1409,7 @@ class MainWindow(QMainWindow):
 
     def load_json_dialog(self):
         """Loads a labels database from JSON and repopulates the canvas."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path:
             QMessageBox.warning(self, "No Image", "Please load the corresponding gel image before loading label data.")
             return
             
@@ -1551,7 +1421,8 @@ class MainWindow(QMainWindow):
         if file_path:
             if self.project.load_from_json(file_path):
                 # Repopulate items on canvas (deferred to prevent PyQt selection crashes)
-                QTimer.singleShot(0, self.canvas.deferred_reload)
+                if self.canvas:
+                    QTimer.singleShot(0, self.canvas.deferred_reload)
                 self.show_status_message(f"Loaded labels from: {os.path.basename(file_path)}")
                 self.update_window_title()
             else:
@@ -1559,7 +1430,7 @@ class MainWindow(QMainWindow):
 
     def export_csv_dialog(self):
         """Exports the label database as a CSV spreadsheet."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path:
             QMessageBox.warning(self, "No Image", "Please load a gel image before exporting database.")
             return
             
@@ -1676,7 +1547,7 @@ class MainWindow(QMainWindow):
 
     def clear_labels_confirm(self):
         """Prompts user to confirm clearing all active labels."""
-        if not self.project.labels:
+        if not self.project or not self.project.labels:
             return
             
         reply = QMessageBox.question(
@@ -1686,40 +1557,31 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.canvas.clear_all_labels()
+            if self.canvas:
+                self.canvas.clear_all_labels()
 
     def undo_action_trigger(self):
         """Restores the previous state from the project's undo stack."""
+        if not self.project:
+            return
         if self.project.undo():
             # Reload from updated project labels (deferred to prevent PyQt selection crashes)
-            QTimer.singleShot(0, self.canvas.deferred_reload)
+            if self.canvas:
+                QTimer.singleShot(0, self.canvas.deferred_reload)
             self.show_status_message("Undo successful.")
         else:
             self.show_status_message("Nothing to undo.")
 
-    def align_everything(self):
-        """Aligns all horizontal tiers and vertical ladders in the project."""
-        if not self.project.labels:
-            QMessageBox.information(self, "No Labels", "There are no labels to align.")
-            return
-            
-        if self.project.align_all_labels():
-            # Defer reloading to prevent PyQt selection crashes
-            QTimer.singleShot(0, self.canvas.deferred_reload)
-            self.show_status_message("Successfully aligned all tiers and ladders!")
-        else:
-            QMessageBox.information(self, "Alignment", "No components (tiers or ladders) with 2 or more labels were found to align.")
-
     def trigger_align_mode(self):
         """Enters interactive 2-click alignment mode on the canvas."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path or not self.canvas:
             QMessageBox.warning(self, "No Image", "Please load a gel image before aligning.")
             return
         self.canvas.enter_align_mode()
 
     def open_manual_rotate_dialog(self):
         """Opens a dialog to manually rotate the image by a specific angle."""
-        if not self.project.image_path:
+        if not self.project or not self.project.image_path:
             QMessageBox.warning(self, "No Image", "Please load a gel image before rotating.")
             return
             
@@ -1768,30 +1630,10 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self.canvas.deferred_reload)
                 self.show_status_message(f"Rotated image manually by {angle}°")
 
-    def increment_next_label(self, current_text: str):
-        """Increments the next label text box counter."""
-        if not current_text:
-            self.next_edit.setText("1")
-            return
-        trimmed = current_text.strip()
-        if trimmed.lower() in ("ladder", "nc", "pc", "blank", "ctrl", "control", "water", "ntc", "marker"):
-            self.next_edit.setText(current_text)
-            return
-
-        import re
-        match = re.search(r"(\d+)$", current_text)
-        if match:
-            num_str = match.group(1)
-            num_val = int(num_str) + 1
-            new_num_str = str(num_val).zfill(len(num_str))
-            next_text = current_text[:match.start()] + new_num_str
-        else:
-            next_text = current_text + "1"
-            
-        self.next_edit.setText(next_text)
-
     def select_all_labels(self):
         """Selects all label items on the canvas."""
+        if not self.canvas:
+            return
         for item in self.canvas.label_items.values():
             item.setSelected(True)
         self.show_status_message(f"Selected all {len(self.canvas.label_items)} labels. Click any color dot to change their colors.")
@@ -1801,6 +1643,9 @@ class MainWindow(QMainWindow):
         self.default_label_color = selected_color
         self.update_toolbar_color_highlight(selected_color)
         
+        if not self.canvas or not self.project:
+            return
+            
         selected_items = self.canvas.scene.selectedItems()
         modified = False
         if selected_items:
@@ -1821,6 +1666,9 @@ class MainWindow(QMainWindow):
         font_family = font.family()
         self.default_label_font_family = font_family
         
+        if not self.canvas or not self.project:
+            return
+            
         selected_items = self.canvas.scene.selectedItems()
         modified = False
         if selected_items:
@@ -1840,6 +1688,9 @@ class MainWindow(QMainWindow):
         """Changes the font size of all selected labels, and updates default font size."""
         self.default_label_size = size
         
+        if not self.canvas or not self.project:
+            return
+            
         selected_items = self.canvas.scene.selectedItems()
         modified = False
         if selected_items:
@@ -1885,17 +1736,15 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self):
         """Displays application details."""
         QMessageBox.about(
-            self, "About Gel Labeler",
-            "<h3>Gel Labeler — Gel Electrophoresis Suite</h3>"
-            "<p>A professional utility for annotating molecular gel wells and counting bacterial colonies.</p>"
-            "<p><b>Features:</b></p>"
+            self, "About Gel Labeler Suite",
+            "<h3>Gel Labeler — Molecular Biology Lab Suite</h3>"
+            "<p>A professional, all-in-one desktop suite for molecular biologists, geneticists, and laboratory researchers.</p>"
+            "<p><b>Included Applications:</b></p>"
             "<ul>"
-            "  <li>Precise pixel-locked coordinates & alignment tools</li>"
-            "  <li>Draggable & style-adjustable text items</li>"
-            "  <li>Subtle high-contrast text glow/drop shadows</li>"
-            "  <li>AI Vision Colony & Seed Counter with CFU estimation</li>"
-            "  <li>JSON Database, CSV Spreadsheet, and PowerPoint (PPTX) export</li>"
-            "  <li>High-resolution pixel-perfect image export</li>"
+            "  <li><b>🧬 Gel Labeler:</b> Multi-tab well boundary marking, PowerPoint widescreen export, CSV database.</li>"
+            "  <li><b>🧪 Master Mixer:</b> PCR, qPCR, restriction digest, and cDNA reaction calculator with pipetting excess scaling.</li>"
+            "  <li><b>📋 Lab Protocols:</b> Interactive digital SOP checklists with built-in countdown bench timers.</li>"
+            "  <li><b>🧫 AI Colony Counter:</b> Computer vision colony and seed counting with CFU/mL estimation.</li>"
             "</ul>"
             "<p>Author: Devanandan K C</p>"
         )
@@ -1906,22 +1755,10 @@ class MainWindow(QMainWindow):
         """Triggered whenever labels are added, dragged, or deleted."""
         self.update_window_title()
 
-    def handle_click_mode_changed(self, mode: str):
-        """Changes the canvas drag mode depending on selected click mode."""
-        tab = self.active_tab
-        if tab:
-            tab.click_mode = mode
-            if tab.canvas:
-                from PyQt6.QtWidgets import QGraphicsView
-                if "Disabled" in mode:
-                    tab.canvas.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-                else:
-                    tab.canvas.setDragMode(QGraphicsView.DragMode.NoDrag)
-
     def update_window_title(self):
         """Updates window title showing file name and modification state."""
         title = "Gel Labeler"
-        if self.project.image_path:
+        if self.project and self.project.image_path:
             filename = os.path.basename(self.project.image_path)
             dirty_star = "*" if self.project.is_dirty else ""
             title = f"{filename}{dirty_star} - {title}"
@@ -1944,10 +1781,6 @@ class MainWindow(QMainWindow):
             pos = item.pos()
             self.coord_label.setText(f"Selected: '{item.toPlainText()}' at pixel: ({int(pos.x())}, {int(pos.y())})")
             
-            # Real-time profile graph update on selection
-            if hasattr(self, 'profile_panel') and hasattr(item, 'label_data') and self.profile_panel:
-                self.profile_panel.set_selected_label(item.label_data)
-            
             # Update toolbar controls to match selected item style
             if hasattr(self, 'font_combo') and hasattr(self, 'font_size_spin'):
                 self.font_combo.blockSignals(True)
@@ -1961,30 +1794,11 @@ class MainWindow(QMainWindow):
                 self.font_size_spin.blockSignals(False)
         else:
             self.coord_label.setText("")
-            if hasattr(self, 'profile_panel') and self.profile_panel:
-                self.profile_panel.set_selected_label(None)
 
-    def on_selected_label_dragged(self, label_id: str, new_x: float, new_y: float):
-        """Triggered in real time when a selected label is dragged."""
-        if hasattr(self, 'profile_panel') and self.profile_panel:
-            self.profile_panel.update_drag_position(label_id, new_x, new_y)
-
-    def toggle_profile_panel(self):
-        """Toggles the visibility of the lane profile panel."""
-        if hasattr(self, 'profile_panel') and self.profile_panel:
-            visible = not self.profile_panel.isVisible()
-            self.profile_panel.setVisible(visible)
-            self.sync_profile_button_state()
-
-    def sync_profile_button_state(self):
-        """Syncs the toolbar/menu action state with the panel visibility."""
-        if hasattr(self, 'profile_panel') and self.profile_panel:
-            if hasattr(self, 'profile_toggle_act'):
-                self.profile_toggle_act.blockSignals(True)
-                self.profile_toggle_act.setChecked(self.profile_panel.isVisible())
-                self.profile_toggle_act.blockSignals(False)
-            if hasattr(self, 'profile_toolbar_btn'):
-                self.profile_toolbar_btn.blockSignals(True)
-                self.profile_toolbar_btn.setChecked(self.profile_panel.isVisible())
-                self.profile_toolbar_btn.blockSignals(False)
+    def on_selected_label_dragged(self, label_id: str, x: float, y: float):
+        """Updates live coordinate readout while dragging a label."""
+        if hasattr(self, 'coord_label'):
+            label = self.project.labels.get(label_id) if self.project else None
+            text = label.text if label else ""
+            self.coord_label.setText(f"Dragging: '{text}' at pixel: ({int(x)}, {int(y)})")
 

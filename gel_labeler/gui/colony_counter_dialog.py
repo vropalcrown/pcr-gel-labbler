@@ -44,7 +44,9 @@ class ColonyCanvas(QGraphicsView):
     def set_image(self, pixmap: QPixmap):
         self.scene.clear()
         self.marker_items.clear()
+        self.colonies.clear()
         self.dish_ring_item = None
+        self.last_dish_circle = None
         self.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
         self.bg_pixmap_item = QGraphicsPixmapItem(pixmap)
@@ -55,10 +57,14 @@ class ColonyCanvas(QGraphicsView):
 
     def draw_dish_boundary(self, dish_circle: Optional[tuple]):
         if self.dish_ring_item:
-            self.scene.removeItem(self.dish_ring_item)
+            try:
+                self.scene.removeItem(self.dish_ring_item)
+            except Exception:
+                pass
             self.dish_ring_item = None
 
         if dish_circle:
+            self.last_dish_circle = dish_circle
             cx, cy, r = dish_circle
             pen = QPen(QColor(0, 255, 204, 180), 2, Qt.PenStyle.DashLine)
             self.dish_ring_item = self.scene.addEllipse(cx - r, cy - r, r * 2, r * 2, pen)
@@ -70,13 +76,20 @@ class ColonyCanvas(QGraphicsView):
         # Clear existing graphical marker items
         for item in self.marker_items:
             if item.get("ellipse"):
-                self.scene.removeItem(item["ellipse"])
+                try:
+                    self.scene.removeItem(item["ellipse"])
+                except Exception:
+                    pass
             if item.get("text"):
-                self.scene.removeItem(item["text"])
+                try:
+                    self.scene.removeItem(item["text"])
+                except Exception:
+                    pass
         self.marker_items.clear()
 
-        if dish_circle:
-            self.draw_dish_boundary(dish_circle)
+        effective_dish_circle = dish_circle if dish_circle is not None else getattr(self, 'last_dish_circle', None)
+        if effective_dish_circle:
+            self.draw_dish_boundary(effective_dish_circle)
 
         qcolor = QColor(self.marker_color)
         pen = QPen(qcolor, 2)
@@ -119,7 +132,8 @@ class ColonyCanvas(QGraphicsView):
             super().mousePressEvent(event)
             return
 
-        scene_pos = self.mapToScene(event.pos())
+        pos = event.position().toPoint()
+        scene_pos = self.mapToScene(pos)
         x, y = scene_pos.x(), scene_pos.y()
 
         if event.button() == Qt.MouseButton.LeftButton:
@@ -158,15 +172,11 @@ class ColonyCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
 
-class ColonyCounterDialog(QDialog):
-    """Modern standalone AI Vision Colony and Seed Counter modal window."""
+class ColonyCounterWidget(QWidget):
+    """Modern AI Vision Colony and Seed Counter view."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🧫 AI Vision Colony & Seed Counter — Gel Labeler")
-        self.resize(1150, 720)
-        self.setMinimumSize(900, 600)
-
         self.image_path: Optional[str] = None
         self.raw_cv_image: Optional[np.ndarray] = None
         self.last_dish_circle: Optional[tuple] = None
@@ -529,7 +539,7 @@ class ColonyCounterDialog(QDialog):
         self.stat_cfu_lbl.setText(f"<b>CFU/mL:</b> {cfu:,.1f}")
 
     def export_image(self):
-        if not self.raw_cv_image is not None or not self.canvas.colonies:
+        if self.raw_cv_image is None or not self.canvas.colonies:
             QMessageBox.warning(self, "No Data", "Please load an image and detect colonies first.")
             return
 
@@ -599,3 +609,17 @@ class ColonyCounterDialog(QDialog):
                 ])
 
         QMessageBox.information(self, "Export Successful", f"Colony data exported to:\n{file_path}")
+
+
+class ColonyCounterDialog(QDialog):
+    """Modal dialog wrapper for ColonyCounterWidget."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🧫 AI Vision Colony & Seed Counter — Gel Labeler")
+        self.resize(1150, 720)
+        self.setMinimumSize(900, 600)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.widget = ColonyCounterWidget(self)
+        layout.addWidget(self.widget)

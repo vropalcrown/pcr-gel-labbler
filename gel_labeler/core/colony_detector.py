@@ -68,11 +68,12 @@ class ColonyDetector:
             circles = np.uint16(np.around(circles))
             best = circles[0][0]
             cx, cy, r = int(best[0]), int(best[1]), int(best[2])
-            r = min(r, cx, cy, w - cx, h - cy)
-            return (cx, cy, max(10, r))
+            r = min(r, cx, cy, max(0, w - cx), max(0, h - cy))
+            if r > 10:
+                return (cx, cy, r)
             
         # Fallback to centered inscribed circle
-        return (w // 2, h // 2, int(min_dim * 0.46))
+        return (w // 2, h // 2, max(10, int(min_dim * 0.46)))
 
     @staticmethod
     def detect_colonies(
@@ -106,6 +107,11 @@ class ColonyDetector:
         h, w = image.shape[:2]
         if h <= 10 or w <= 10:
             return [], None
+
+        min_radius = max(1, int(min_radius))
+        max_radius = max(1, int(max_radius))
+        if min_radius > max_radius:
+            min_radius, max_radius = max_radius, min_radius
             
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image.copy()
         
@@ -114,11 +120,11 @@ class ColonyDetector:
         mask = np.ones((h, w), dtype=np.uint8) * 255
         if mask_petri_dish:
             dish_circle = ColonyDetector.detect_petri_dish_circle(image)
-            if dish_circle:
+            if dish_circle and dish_circle[2] > 0:
                 cx, cy, r = dish_circle
                 dish_mask = np.zeros((h, w), dtype=np.uint8)
                 # Inset circular mask slightly (94% radius) to completely avoid rim artifacts
-                cv2.circle(dish_mask, (cx, cy), int(r * 0.94), 255, -1)
+                cv2.circle(dish_mask, (cx, cy), max(1, int(r * 0.94)), 255, -1)
                 mask = dish_mask
                 
         # 2. Gaussian Denoising
@@ -186,7 +192,10 @@ class ColonyDetector:
                         continue
                         
                     perimeter = cv2.arcLength(cnt, True)
-                    if perimeter > 0:
+                    if perimeter <= 0:
+                        if circularity_min > 0:
+                            continue
+                    else:
                         circ = 4 * np.pi * (area / (perimeter * perimeter))
                         if circ < circularity_min:
                             continue
@@ -216,7 +225,10 @@ class ColonyDetector:
                     continue
                     
                 perimeter = cv2.arcLength(cnt, True)
-                if perimeter > 0:
+                if perimeter <= 0:
+                    if circularity_min > 0:
+                        continue
+                else:
                     circ = 4 * np.pi * (area / (perimeter * perimeter))
                     if circ < circularity_min:
                         continue

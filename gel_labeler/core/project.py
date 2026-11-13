@@ -6,8 +6,6 @@ import time
 import math
 import logging
 from typing import Dict, List, Optional
-import cv2
-import numpy as np
 from PyQt6.QtGui import QImage, QTransform
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from gel_labeler.core.label import GelLabel
@@ -29,7 +27,6 @@ class GelProject:
         self.is_dirty: bool = False  # Track unsaved changes
         self.undo_stack: List[List[dict]] = []
         self._in_batch_operation: bool = False
-        self.gray_data: Optional[np.ndarray] = None
 
     def reset(self):
         """Resets the project state."""
@@ -40,7 +37,6 @@ class GelProject:
         self.is_dirty = False
         self.undo_stack.clear()
         self._in_batch_operation = False
-        self.gray_data = None
 
     def save_undo_state(self):
         """Saves the current label states to the undo stack."""
@@ -77,18 +73,10 @@ class GelProject:
             for label_data in state_data.get("labels", []):
                 label = GelLabel.from_dict(label_data)
                 self.labels[label.id] = label
-            old_path = self.image_path
             self.image_path = state_data.get("image_path")
             self.image_width = state_data.get("image_width", self.image_width)
             self.image_height = state_data.get("image_height", self.image_height)
             self.is_dirty = state_data.get("is_dirty", True)
-            
-            # If path changed during undo (e.g. rotated back), reload gray data
-            if self.image_path != old_path:
-                if self.image_path:
-                    self.gray_data = cv2.imread(self.image_path, cv2.IMREAD_GRAYSCALE)
-                else:
-                    self.gray_data = None
             
         return True
 
@@ -99,7 +87,6 @@ class GelProject:
         self.image_height = height
         self.labels.clear()
         self.is_dirty = False
-        self.gray_data = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
 
     def rotate_image(self, angle_deg: float) -> bool:
         """Rotates the background image and maps label coordinates to the new rotated space.
@@ -136,16 +123,6 @@ class GelProject:
             logger.error(f"Failed to save rotated image to {new_path}")
             return False
             
-        # Verify saved image can be read by cv2
-        new_gray = cv2.imread(new_path, cv2.IMREAD_GRAYSCALE)
-        if new_gray is None:
-            logger.error(f"Saved rotated image could not be loaded back by cv2: {new_path}")
-            try:
-                os.remove(new_path)
-            except Exception:
-                pass
-            return False
-
         self.save_undo_state()
         
         # Map existing labels
@@ -161,7 +138,6 @@ class GelProject:
         self.image_path = new_path
         self.image_width = rotated_image.width()
         self.image_height = rotated_image.height()
-        self.gray_data = new_gray
         self.is_dirty = True
         return True
 
@@ -265,7 +241,7 @@ class GelProject:
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # Write Header
-            writer.writerow(["label_id", "text", "pixel_x", "pixel_y", "color", "font_size", "font_family"])
+            writer.writerow(["label_id", "text", "pixel_x", "pixel_y", "color", "font_size", "font_family", "rotation"])
             # Write label rows in natural reading order
             for label in self.get_labels_reading_order():
                 writer.writerow([
@@ -275,7 +251,8 @@ class GelProject:
                     round(label.y, 2),
                     self.sanitize_csv_cell(label.color),
                     label.font_size,
-                    self.sanitize_csv_cell(label.font_family)
+                    self.sanitize_csv_cell(label.font_family),
+                    round(label.rotation, 1)
                 ])
 
     def generate_grid_from_tiers(self, tiers_config: List[dict],
@@ -366,129 +343,6 @@ class GelProject:
             self.is_dirty = True
         finally:
             self._in_batch_operation = False
-
-    def generate_ladder_labels(self, bands: List[str], x1: float, y1: float, x2: float, y2: float, 
-                               alignment: str, color: str, font_size: int, rotation: float = 0.0, font_family: str = "Arial"):
-        """Generates molecular weight labels vertically down a ladder lane.
-        
-        Aligns the labels to the left or right of the vertical lane to prevent obscuring bands.
-        """
-        self.save_undo_state()
-        self._in_batch_operation = True
-        try:
-            # Determine X offset to sit neatly next to the bands
-            offset_x = -45 if alignment == "Left" else 15
-            
-            n_bands = len(bands)
-            for i, band_text in enumerate(bands):
-                t = i / (n_bands - 1) if n_bands > 1 else 0.5
-                x = x1 + t * (x2 - x1) + offset_x
-                # Shift slightly vertically to center text on the band line
-                y = y1 + t * (y2 - y1) - (font_size / 2)
-                
-                self.add_label(
-                    text=band_text,
-                    x=x,
-                    y=y,
-                    color=color,
-                    font_size=font_size,
-                    rotation=rotation,
-                    font_family=font_family
-                )
-            self.is_dirty = True
-        finally:
-            self._in_batch_operation = False
-
-    def align_all_labels(self) -> bool:
-        """Aligns all horizontal tiers and vertical ladders between their endpoints.
-        
-        Horizontal tiers are groups of labels with small Y difference.
-        Vertical ladders are groups of labels with small X difference.
-        """
-        self.save_undo_state()
-        labels = self.get_labels_list()
-        n = len(labels)
-        if n < 2:
-            return False
-            
-        # 1. Identify vertical ladders/lanes (sets of 3+ labels with small X difference)
-        visited_v = [False] * n
-        v_components = []
-        
-        for i in range(n):
-            if visited_v[i]:
-                continue
-            comp = [i]
-            for j in range(n):
-                if j != i and not visited_v[j]:
-                    if abs(labels[j].x - labels[i].x) < 25:
-                        comp.append(j)
-            
-            if len(comp) >= 3:
-                xs = [labels[idx].x for idx in comp]
-                ys = [labels[idx].y for idx in comp]
-                x_span = max(xs) - min(xs)
-                y_span = max(ys) - min(ys)
-                if y_span > 2.0 * x_span:
-                    v_components.append(comp)
-                    for idx in comp:
-                        visited_v[idx] = True
-                        
-        # 2. Group the remaining pool of labels by Y coordinate into horizontal tiers
-        remaining_indices = [i for i in range(n) if not visited_v[i]]
-        h_components = []
-        if remaining_indices:
-            remaining_indices.sort(key=lambda idx: labels[idx].y)
-            
-            current_comp = [remaining_indices[0]]
-            for idx in remaining_indices[1:]:
-                if labels[idx].y - labels[current_comp[-1]].y < 50:
-                    current_comp.append(idx)
-                else:
-                    if len(current_comp) >= 2:
-                        h_components.append(current_comp)
-                    current_comp = [idx]
-            if len(current_comp) >= 2:
-                h_components.append(current_comp)
-                
-        modified = False
-        
-        # Process horizontal components
-        for comp in h_components:
-            comp.sort(key=lambda idx: labels[idx].x)
-            first_lbl = labels[comp[0]]
-            last_lbl = labels[comp[-1]]
-            x0, y0 = first_lbl.x, first_lbl.y
-            x1, y1 = last_lbl.x, last_lbl.y
-            
-            count = len(comp)
-            for i, idx in enumerate(comp):
-                t = i / (count - 1)
-                new_x = x0 + t * (x1 - x0)
-                new_y = y0 + t * (y1 - y0)
-                labels[idx].update_position(new_x, new_y)
-            modified = True
-            
-        # Process vertical components
-        for comp in v_components:
-            comp.sort(key=lambda idx: labels[idx].y)
-            first_lbl = labels[comp[0]]
-            last_lbl = labels[comp[-1]]
-            x0, y0 = first_lbl.x, first_lbl.y
-            x1, y1 = last_lbl.x, last_lbl.y
-            
-            count = len(comp)
-            for i, idx in enumerate(comp):
-                t = i / (count - 1)
-                new_x = x0 + t * (x1 - x0)
-                new_y = y0 + t * (y1 - y0)
-                labels[idx].update_position(new_x, new_y)
-            modified = True
-            
-        if modified:
-            self.is_dirty = True
-            
-        return modified
 
     def export_to_pptx(self, file_path: str):
         """Exports the current gel image and all its labels to a PowerPoint (.pptx) file.

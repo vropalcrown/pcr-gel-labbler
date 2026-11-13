@@ -87,14 +87,11 @@
             <!-- Sidebar Panel: Controls & Options -->
             <aside class="control-panel">
                 <!-- 0. Gel Image Source Section -->
+                <!-- 0. Gel Image Source Section -->
                 <section class="panel-section">
                     <h2 class="section-title"><i class="fa-solid fa-image"></i> Gel Image Source</h2>
                     <div class="section-content">
-                        <label for="sidebar-file-input" class="action-btn primary-btn w-100 select-file-label text-center" style="cursor: pointer;">
-                            <i class="fa-solid fa-upload"></i> Load / Replace Gel Image
-                        </label>
-                        <input type="file" id="sidebar-file-input" accept="image/*" class="hidden-file-input">
-                        <div id="gel-img-info" class="mt-2 text-muted font-11 text-center">No image loaded (drop or browse)</div>
+                        <div id="gel-img-info" class="text-muted font-11 text-center">No image loaded (drop image or click Open Image above)</div>
                     </div>
                 </section>
 
@@ -201,75 +198,10 @@
                                 <i class="fa-solid fa-arrows-up-down"></i> Dist. V
                             </button>
                         </div>
-                        <div class="grid-buttons mt-2">
-                            <button id="select-all-btn" class="tool-btn" title="Select all active labels (Ctrl+A)">
-                                <i class="fa-solid fa-check-double"></i> Select All
-                            </button>
-                            <button id="align-everything-btn" class="tool-btn primary-tool-btn" title="Auto-align all horizontal tiers and vertical ladders (Ctrl+Shift+A)">
-                                <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Align
-                            </button>
-                        </div>
                     </div>
                 </section>
 
-                <!-- 4. Modeless Visual Grid Overlay Section -->
-                <section class="panel-section">
-                    <h2 class="section-title"><i class="fa-solid fa-border-all"></i> Visual Grid Overlay Reference</h2>
-                    <div class="section-content">
-                        <div class="toggle-row">
-                            <input type="checkbox" id="grid-enable-check">
-                            <label for="grid-enable-check" class="check-label">Show Reference Grid</label>
-                        </div>
-
-                        <div id="grid-controls-container" class="grid-controls-wrap">
-                            <div class="form-group">
-                                <label for="grid-color-select">Grid Line Color:</label>
-                                <select id="grid-color-select">
-                                    <option value="#E29C3D">🍊 Blender Orange</option>
-                                    <option value="#00FF00">🟢 Neon Green</option>
-                                    <option value="#FF0000">🔴 Bright Red</option>
-                                    <option value="#00FFFF">🔵 Electric Cyan</option>
-                                    <option value="#FFFFFF">⚪ Pure White</option>
-                                    <option value="#555555">⚫ Muted Gray</option>
-                                </select>
-                            </div>
-
-                            <div class="slider-row">
-                                <div class="slider-header">
-                                    <label for="grid-x-spacing">H Spacing (X px):</label>
-                                    <span id="grid-x-spacing-val">40</span>
-                                </div>
-                                <input type="range" id="grid-x-spacing" min="5" max="500" value="40">
-                            </div>
-
-                            <div class="slider-row">
-                                <div class="slider-header">
-                                    <label for="grid-y-spacing">V Spacing (Y px):</label>
-                                    <span id="grid-y-spacing-val">40</span>
-                                </div>
-                                <input type="range" id="grid-y-spacing" min="5" max="500" value="40">
-                            </div>
-
-                            <div class="slider-row">
-                                <div class="slider-header">
-                                    <label for="grid-x-offset">X Offset (px):</label>
-                                    <span id="grid-x-offset-val">0</span>
-                                </div>
-                                <input type="range" id="grid-x-offset" min="-500" max="500" value="0">
-                            </div>
-
-                            <div class="slider-row">
-                                <div class="slider-header">
-                                    <label for="grid-y-offset">Y Offset (px):</label>
-                                    <span id="grid-y-offset-val">0</span>
-                                </div>
-                                <input type="range" id="grid-y-offset" min="-500" max="500" value="0">
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- 5. Slide Customization -->
+                <!-- 4. Slide Customization -->
                 <section class="panel-section">
                     <h2 class="section-title"><i class="fa-solid fa-sliders"></i> Slide Presentation Settings</h2>
                     <div class="section-content">
@@ -288,10 +220,6 @@
             <main class="canvas-viewport" id="canvas-viewport">
                 <!-- Floating Canvas View Toolbar -->
                 <div class="floating-canvas-toolbar" id="floating-canvas-toolbar">
-                    <button id="floating-select-all-btn" class="icon-btn zoom-btn" title="Select All Labels (Ctrl+A)">
-                        <i class="fa-solid fa-check-double"></i>
-                    </button>
-                    <div style="width: 1px; height: 16px; background: #444; margin: 0 2px;"></div>
                     <button id="zoom-in-btn" class="icon-btn zoom-btn" title="Zoom In (+)">
                         <i class="fa-solid fa-magnifying-glass-plus"></i>
                     </button>
@@ -353,11 +281,7 @@
                 <section class="panel-section">
                     <h2 class="section-title"><i class="fa-solid fa-folder-open"></i> Plate / Tray Image</h2>
                     <div class="section-content">
-                        <label for="colony-file-input" class="action-btn primary-btn w-100 select-file-label text-center">
-                            <i class="fa-solid fa-upload"></i> Load Plate Image
-                        </label>
-                        <input type="file" id="colony-file-input" accept="image/*" class="hidden-file-input">
-                        <div id="colony-img-info" class="mt-2 text-muted font-11">No plate image loaded</div>
+                        <div id="colony-img-info" class="text-muted font-11">No plate image loaded (drop image or click Load Plate above)</div>
                     </div>
                 </section>
 

@@ -39,7 +39,6 @@
         addTabBtn: document.getElementById("add-tab-btn"),
         headerFileInput: document.getElementById("header-file-input"),
         headerSelectAllBtn: document.getElementById("header-select-all-btn"),
-        floatingSelectAllBtn: document.getElementById("floating-select-all-btn"),
         undoBtn: document.getElementById("undo-btn"),
         redoBtn: document.getElementById("redo-btn"),
         exportImgBtn: document.getElementById("export-img-btn"),
@@ -65,25 +64,10 @@
         alignBottomBtn: document.getElementById("align-bottom-btn"),
         distHorizBtn: document.getElementById("dist-horiz-btn"),
         distVertBtn: document.getElementById("dist-vert-btn"),
-        selectAllBtn: document.getElementById("select-all-btn"),
-        alignEverythingBtn: document.getElementById("align-everything-btn"),
-        gridEnableCheck: document.getElementById("grid-enable-check"),
-        gridColorSelect: document.getElementById("grid-color-select"),
-        gridXSpacing: document.getElementById("grid-x-spacing"),
-        gridYSpacing: document.getElementById("grid-y-spacing"),
-        gridXOffset: document.getElementById("grid-x-offset"),
-        gridYOffset: document.getElementById("grid-y-offset"),
-        gridXSpacingVal: document.getElementById("grid-x-spacing-val"),
-        gridYSpacingVal: document.getElementById("grid-y-spacing-val"),
-        gridXOffsetVal: document.getElementById("grid-x-offset-val"),
-        gridYOffsetVal: document.getElementById("grid-y-offset-val"),
-        gridControlsContainer: document.getElementById("grid-controls-container"),
         slideTitleInput: document.getElementById("slide-title-input"),
         clearLabelsBtn: document.getElementById("clear-labels-btn"),
         uploadDropzone: document.getElementById("upload-dropzone"),
         fileUploadInput: document.getElementById("file-upload-input"),
-        headerFileInput: document.getElementById("header-file-input"),
-        sidebarFileInput: document.getElementById("sidebar-file-input"),
         gelImgInfo: document.getElementById("gel-img-info"),
         canvasContainer: document.getElementById("canvas-container"),
         canvasWrapper: document.getElementById("canvas-wrapper"),
@@ -123,7 +107,6 @@
         modalCloseBtn: document.getElementById("modal-close-btn"),
 
         // Colony Counter Module Elements
-        colonyFileInput: document.getElementById("colony-file-input"),
         colonyFileInputBtn: document.getElementById("colony-file-input-btn"),
         colonyDropzone: document.getElementById("colony-dropzone"),
         colonyCanvasContainer: document.getElementById("colony-canvas-container"),
@@ -224,10 +207,10 @@
                         continue;
                     }
                     
-                    // Case 2: Letter-prefixed range (e.g. S111-S119 or L1-L30 or P01-P09)
-                    const mStart = startStr.match(/^([a-zA-Z_]+)(\d+)$/);
-                    const mEnd = endStr.match(/^([a-zA-Z_]+)(\d+)$/);
-                    if (mStart && mEnd && mStart[1] === mEnd[1]) {
+                    // Case 2: Letter-prefixed range (e.g. S111-S119 or L1-L30 or P01-P09 or Lane 1 - Lane 5)
+                    const mStart = startStr.match(/^([a-zA-Z_ ]+?)(\d+)$/);
+                    const mEnd = endStr.match(/^([a-zA-Z_ ]+?)(\d+)$/);
+                    if (mStart && mEnd && mStart[1].trim() === mEnd[1].trim()) {
                         const prefix = mStart[1];
                         const startVal = parseInt(mStart[2], 10);
                         let endVal = parseInt(mEnd[2], 10);
@@ -236,7 +219,7 @@
                             endVal = startVal <= endVal ? startVal + MAX_RANGE_SPAN - 1 : startVal - MAX_RANGE_SPAN + 1;
                         }
 
-                        const padLen = (startStr.startsWith(prefix + "0") || endStr.startsWith(prefix + "0"))
+                        const padLen = (mStart[2].startsWith("0") || mEnd[2].startsWith("0"))
                             ? Math.max(mStart[2].length, mEnd[2].length) : 0;
                         const step = startVal <= endVal ? 1 : -1;
                         for (let val = startVal; step > 0 ? val <= endVal : val >= endVal; val += step) {
@@ -374,12 +357,6 @@
             imageHeight: 0,
             labels: {}, // Keyed by label.id
             selectedIds: [],
-            gridEnabled: false,
-            gridXSpacing: 40,
-            gridYSpacing: 40,
-            gridXOffset: 0,
-            gridYOffset: 0,
-            gridColor: "#E29C3D",
             slideTitle: "",
             defaultLabelFontFamily: "Arial",
             defaultLabelSize: 12,
@@ -566,8 +543,7 @@
                 elements.canvasWrapper.style.height = elements.gelImageDisplay.naturalHeight + "px";
                 elements.gridOverlaySvg.setAttribute("viewBox", `0 0 ${elements.gelImageDisplay.naturalWidth} ${elements.gelImageDisplay.naturalHeight}`);
                 
-                // Draw layers
-                renderActiveTabGrid();
+                // Draw labels layer
                 renderActiveTabLabels();
             };
         } else {
@@ -619,23 +595,6 @@
         // Slide title
         elements.slideTitleInput.value = tab.slideTitle || "";
         
-        // Reference grid checkbox and overlay values
-        elements.gridEnableCheck.checked = tab.gridEnabled;
-        if (tab.gridEnabled) {
-            elements.gridControlsContainer.classList.add("visible");
-        } else {
-            elements.gridControlsContainer.classList.remove("visible");
-        }
-        
-        elements.gridColorSelect.value = tab.gridColor;
-        elements.gridXSpacing.value = tab.gridXSpacing;
-        elements.gridXSpacingVal.textContent = tab.gridXSpacing;
-        elements.gridYSpacing.value = tab.gridYSpacing;
-        elements.gridYSpacingVal.textContent = tab.gridYSpacing;
-        elements.gridXOffset.value = tab.gridXOffset;
-        elements.gridXOffsetVal.textContent = tab.gridXOffset;
-        elements.gridYOffset.value = tab.gridYOffset;
-        elements.gridYOffsetVal.textContent = tab.gridYOffset;
     }
 
     function updateHeaderActionButtons() {
@@ -649,68 +608,6 @@
         const noImage = !tab.imageSrc;
         elements.exportImgBtn.disabled = noImage;
         elements.exportPptxBtn.disabled = noImage;
-    }
-
-    // --- Real-time Visual Reference Grid Drawing ---
-
-    function renderActiveTabGrid() {
-        const tab = getActiveTab();
-        while (elements.gridOverlaySvg.firstChild) {
-            elements.gridOverlaySvg.removeChild(elements.gridOverlaySvg.firstChild);
-        }
-        if (!tab || !tab.gridEnabled || !tab.imageWidth || !tab.imageHeight) {
-            return;
-        }
-        
-        const w = tab.imageWidth;
-        const h = tab.imageHeight;
-        
-        const xSpacing = Math.max(5, tab.gridXSpacing);
-        const ySpacing = Math.max(5, tab.gridYSpacing);
-        const gridColor = sanitizeHexColor(tab.gridColor, "#E29C3D");
-        
-        const svgNS = "http://www.w3.org/2000/svg";
-        const fragment = document.createDocumentFragment();
-        
-        // Vertical lines
-        let xStart = (tab.gridXOffset % xSpacing);
-        if (xStart > 0) {
-            xStart -= xSpacing;
-        }
-        
-        for (let x = xStart; x <= w; x += xSpacing) {
-            if (x >= 0) {
-                const line = document.createElementNS(svgNS, "line");
-                line.setAttribute("x1", String(x));
-                line.setAttribute("y1", "0");
-                line.setAttribute("x2", String(x));
-                line.setAttribute("y2", String(h));
-                line.setAttribute("stroke", gridColor);
-                line.setAttribute("stroke-width", "1");
-                fragment.appendChild(line);
-            }
-        }
-        
-        // Horizontal lines
-        let yStart = (tab.gridYOffset % ySpacing);
-        if (yStart > 0) {
-            yStart -= ySpacing;
-        }
-        
-        for (let y = yStart; y <= h; y += ySpacing) {
-            if (y >= 0) {
-                const line = document.createElementNS(svgNS, "line");
-                line.setAttribute("x1", "0");
-                line.setAttribute("y1", String(y));
-                line.setAttribute("x2", String(w));
-                line.setAttribute("y2", String(y));
-                line.setAttribute("stroke", gridColor);
-                line.setAttribute("stroke-width", "1");
-                fragment.appendChild(line);
-            }
-        }
-        
-        elements.gridOverlaySvg.appendChild(fragment);
     }
 
     // --- Interactive Labels Rendering and DOM Actions ---
@@ -1143,13 +1040,9 @@
 
         if (isInputFocused) return;
 
-        // Global hotkeys (Ctrl+A, Ctrl+Shift+A, Ctrl+Z, Ctrl+Y, Ctrl+B)
+        // Global hotkeys (Ctrl+A, Ctrl+Z, Ctrl+Y, Ctrl+B)
         if (isCtrl && key.toLowerCase() === "a") {
-            if (e.shiftKey) {
-                alignEverything();
-            } else {
-                selectAllLabels();
-            }
+            selectAllLabels();
             e.preventDefault();
             return;
         }
@@ -1264,56 +1157,64 @@
         const selectedLabels = tab.selectedIds.map(id => tab.labels[id]).filter(Boolean);
         if (selectedLabels.length < 2) return;
         
+        // Measure actual rendered DOM node bounding dimensions
+        const items = selectedLabels.map(l => {
+            const el = document.getElementById("label-" + l.id);
+            const w = el ? el.offsetWidth : (l.text.length * (l.fontSize || 14) * 0.6 + 10);
+            const h = el ? el.offsetHeight : ((l.fontSize || 14) * 1.4);
+            return { label: l, w, h };
+        });
+        
         if (type === "Left") {
-            const minX = Math.min(...selectedLabels.map(l => l.x));
-            selectedLabels.forEach(l => l.x = minX);
+            const minX = Math.min(...items.map(it => it.label.x));
+            items.forEach(it => it.label.x = minX);
             showStatus("Aligned selected labels Left.");
         } else if (type === "Center") {
-            const avgX = Math.round(selectedLabels.reduce((s, l) => s + l.x, 0) / selectedLabels.length);
-            selectedLabels.forEach(l => l.x = avgX);
+            const avgCenterX = items.reduce((s, it) => s + (it.label.x + it.w / 2), 0) / items.length;
+            items.forEach(it => it.label.x = Math.round(avgCenterX - it.w / 2));
             showStatus("Aligned selected labels Center.");
         } else if (type === "Right") {
-            const maxX = Math.max(...selectedLabels.map(l => l.x));
-            selectedLabels.forEach(l => l.x = maxX);
+            const maxRightX = Math.max(...items.map(it => it.label.x + it.w));
+            items.forEach(it => it.label.x = Math.round(maxRightX - it.w));
             showStatus("Aligned selected labels Right.");
         } else if (type === "Top") {
-            const minY = Math.min(...selectedLabels.map(l => l.y));
-            selectedLabels.forEach(l => l.y = minY);
+            const minY = Math.min(...items.map(it => it.label.y));
+            items.forEach(it => it.label.y = minY);
             showStatus("Aligned selected labels Top.");
         } else if (type === "Middle") {
-            const avgY = Math.round(selectedLabels.reduce((s, l) => s + l.y, 0) / selectedLabels.length);
-            selectedLabels.forEach(l => l.y = avgY);
+            const avgCenterY = items.reduce((s, it) => s + (it.label.y + it.h / 2), 0) / items.length;
+            items.forEach(it => it.label.y = Math.round(avgCenterY - it.h / 2));
             showStatus("Aligned selected labels Middle.");
         } else if (type === "Bottom") {
-            const maxY = Math.max(...selectedLabels.map(l => l.y));
-            selectedLabels.forEach(l => l.y = maxY);
+            const maxBottomY = Math.max(...items.map(it => it.label.y + it.h));
+            items.forEach(it => it.label.y = Math.round(maxBottomY - it.h));
             showStatus("Aligned selected labels Bottom.");
         } else if (type === "DistributeHorizontally") {
-            if (selectedLabels.length < 3) {
+            if (items.length < 3) {
                 showStatus("Select at least 3 labels to distribute horizontally.");
                 return;
             }
-            selectedLabels.sort((a, b) => a.x - b.x);
-            const leftmostX = selectedLabels[0].x;
-            const rightmostX = selectedLabels[selectedLabels.length - 1].x;
-            const spacing = (rightmostX - leftmostX) / (selectedLabels.length - 1);
+            items.sort((a, b) => a.label.x - b.label.x);
+            const leftmostX = items[0].label.x;
+            const rightmostX = items[items.length - 1].label.x;
+            const spacing = (rightmostX - leftmostX) / (items.length - 1);
             
-            for (let i = 1; i < selectedLabels.length - 1; i++) {
-                selectedLabels[i].x = Math.round(leftmostX + i * spacing);
+            for (let i = 1; i < items.length - 1; i++) {
+                items[i].label.x = Math.round(leftmostX + i * spacing);
             }
             showStatus("Distributed selected labels horizontally.");
         } else if (type === "DistributeVertically") {
-            if (selectedLabels.length < 3) {
+            if (items.length < 3) {
                 showStatus("Select at least 3 labels to distribute vertically.");
                 return;
             }
-            selectedLabels.sort((a, b) => a.y - b.y);
-            const topmostY = selectedLabels[0].y;
-            const bottommostY = selectedLabels[selectedLabels.length - 1].y;
-            const spacing = (bottommostY - topmostY) / (selectedLabels.length - 1);
+            items.sort((a, b) => a.label.y - b.label.y);
+            const topmostY = items[0].label.y;
+            const bottommostY = items[items.length - 1].label.y;
+            const spacing = (bottommostY - topmostY) / (items.length - 1);
             
-            for (let i = 1; i < selectedLabels.length - 1; i++) {
-                selectedLabels[i].y = Math.round(topmostY + i * spacing);
+            for (let i = 1; i < items.length - 1; i++) {
+                items[i].label.y = Math.round(topmostY + i * spacing);
             }
             showStatus("Distributed selected labels vertically.");
         }
@@ -1332,48 +1233,6 @@
         renderActiveTabLabels();
         updateSelectionStatus();
         showStatus(`Selected all ${tab.selectedIds.length} labels.`);
-    }
-
-    function alignEverything() {
-        const tab = getActiveTab();
-        if (!tab || Object.keys(tab.labels).length < 2) {
-            showStatus("Need at least 2 labels to auto-align.");
-            return;
-        }
-        saveUndoState(tab);
-        
-        // Group labels into horizontal rows (within 35px vertically)
-        const allLabels = Object.values(tab.labels);
-        const rows = [];
-        allLabels.forEach(lbl => {
-            let foundRow = rows.find(r => Math.abs(r.avgY - lbl.y) < 35);
-            if (foundRow) {
-                foundRow.labels.push(lbl);
-                foundRow.avgY = foundRow.labels.reduce((s, l) => s + l.y, 0) / foundRow.labels.length;
-            } else {
-                rows.push({ avgY: lbl.y, labels: [lbl] });
-            }
-        });
-        
-        rows.forEach(r => {
-            if (r.labels.length >= 2) {
-                const targetY = Math.round(r.avgY);
-                r.labels.sort((a, b) => a.x - b.x);
-                const minX = r.labels[0].x;
-                const maxX = r.labels[r.labels.length - 1].x;
-                const spacing = (maxX - minX) / (r.labels.length - 1);
-                r.labels.forEach((l, i) => {
-                    l.y = targetY;
-                    if (r.labels.length > 2 && i > 0 && i < r.labels.length - 1) {
-                        l.x = Math.round(minX + i * spacing);
-                    }
-                });
-            }
-        });
-        
-        renderActiveTabLabels();
-        autosaveSession();
-        showStatus("Auto-aligned all horizontal tiers and vertical lanes!");
     }
 
     // --- Canvas Zoom & View Controls ---
@@ -1570,12 +1429,6 @@
                 imageHeight: t.imageHeight,
                 labels: t.labels,
                 selectedIds: t.selectedIds,
-                gridEnabled: t.gridEnabled,
-                gridXSpacing: t.gridXSpacing,
-                gridYSpacing: t.gridYSpacing,
-                gridXOffset: t.gridXOffset,
-                gridYOffset: t.gridYOffset,
-                gridColor: t.gridColor,
                 slideTitle: t.slideTitle,
                 defaultLabelFontFamily: t.defaultLabelFontFamily,
                 defaultLabelSize: t.defaultLabelSize,
@@ -1633,12 +1486,6 @@
                     imageHeight: Math.round(sanitizeNumber(t.imageHeight, 0, 0, 50000)),
                     labels: validLabels,
                     selectedIds: validSelectedIds,
-                    gridEnabled: Boolean(t.gridEnabled),
-                    gridXSpacing: Math.round(sanitizeNumber(t.gridXSpacing, 40, 5, 500)),
-                    gridYSpacing: Math.round(sanitizeNumber(t.gridYSpacing, 40, 5, 500)),
-                    gridXOffset: Math.round(sanitizeNumber(t.gridXOffset, 0, -500, 500)),
-                    gridYOffset: Math.round(sanitizeNumber(t.gridYOffset, 0, -500, 500)),
-                    gridColor: sanitizeHexColor(t.gridColor, "#E29C3D"),
                     slideTitle: sanitizeText(t.slideTitle || ""),
                     defaultLabelFontFamily: typeof t.defaultLabelFontFamily === "string" ? t.defaultLabelFontFamily.slice(0, 50) : "Arial",
                     defaultLabelSize: Math.round(sanitizeNumber(t.defaultLabelSize, 12, 6, 72)),
@@ -1961,10 +1808,7 @@
     if (elements.alignBottomBtn) elements.alignBottomBtn.addEventListener("click", () => alignLabels("Bottom"));
     if (elements.distHorizBtn) elements.distHorizBtn.addEventListener("click", () => alignLabels("DistributeHorizontally"));
     if (elements.distVertBtn) elements.distVertBtn.addEventListener("click", () => alignLabels("DistributeVertically"));
-    if (elements.selectAllBtn) elements.selectAllBtn.addEventListener("click", selectAllLabels);
     if (elements.headerSelectAllBtn) elements.headerSelectAllBtn.addEventListener("click", selectAllLabels);
-    if (elements.floatingSelectAllBtn) elements.floatingSelectAllBtn.addEventListener("click", selectAllLabels);
-    if (elements.alignEverythingBtn) elements.alignEverythingBtn.addEventListener("click", alignEverything);
 
     // Zoom & Canvas View Controls
     if (elements.zoomInBtn) elements.zoomInBtn.addEventListener("click", zoomIn);
@@ -1972,14 +1816,9 @@
     if (elements.zoomResetBtn) elements.zoomResetBtn.addEventListener("click", zoomReset);
     if (elements.zoomFitBtn) elements.zoomFitBtn.addEventListener("click", zoomFit);
 
-    // Extra File Input Handlers (Header & Sidebar)
+    // File Input Handlers
     if (elements.headerFileInput) {
         elements.headerFileInput.addEventListener("change", (e) => {
-            if (e.target.files.length > 0) handleImageFileLoad(e.target.files[0]);
-        });
-    }
-    if (elements.sidebarFileInput) {
-        elements.sidebarFileInput.addEventListener("change", (e) => {
             if (e.target.files.length > 0) handleImageFileLoad(e.target.files[0]);
         });
     }
@@ -1988,51 +1827,6 @@
             if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
         });
     }
-
-    // Grid checkbox and sliders
-    elements.gridEnableCheck.addEventListener("change", (e) => {
-        const tab = getActiveTab();
-        if (!tab) return;
-        
-        tab.gridEnabled = e.target.checked;
-        if (tab.gridEnabled) {
-            elements.gridControlsContainer.classList.add("visible");
-        } else {
-            elements.gridControlsContainer.classList.remove("visible");
-        }
-        renderActiveTabGrid();
-        autosaveSession();
-    });
-
-    elements.gridColorSelect.addEventListener("change", (e) => {
-        const tab = getActiveTab();
-        if (tab) {
-            tab.gridColor = e.target.value;
-            renderActiveTabGrid();
-            autosaveSession();
-        }
-    });
-
-    function handleGridSliderInput(sliderNode, valueSpanNode, stateKey) {
-        sliderNode.addEventListener("input", (e) => {
-            const tab = getActiveTab();
-            if (tab) {
-                const val = parseInt(e.target.value, 10);
-                valueSpanNode.textContent = val;
-                tab[stateKey] = val;
-                renderActiveTabGrid();
-            }
-        });
-        
-        sliderNode.addEventListener("change", () => {
-            autosaveSession();
-        });
-    }
-
-    handleGridSliderInput(elements.gridXSpacing, elements.gridXSpacingVal, "gridXSpacing");
-    handleGridSliderInput(elements.gridYSpacing, elements.gridYSpacingVal, "gridYSpacing");
-    handleGridSliderInput(elements.gridXOffset, elements.gridXOffsetVal, "gridXOffset");
-    handleGridSliderInput(elements.gridYOffset, elements.gridYOffsetVal, "gridYOffset");
 
     // Slide Customizations
     elements.slideTitleInput.addEventListener("input", (e) => {
@@ -2473,12 +2267,11 @@
     elements.colonyDilutionSelect.addEventListener("change", updateColonyStatistics);
 
     // File Drop & Browse Listeners for Colony Counter
-    elements.colonyFileInput.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
-    });
-    elements.colonyFileInputBtn.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
-    });
+    if (elements.colonyFileInputBtn) {
+        elements.colonyFileInputBtn.addEventListener("change", (e) => {
+            if (e.target.files.length > 0) handleColonyImageFile(e.target.files[0]);
+        });
+    }
 
     elements.colonyViewport.addEventListener("dragover", (e) => {
         e.preventDefault();
