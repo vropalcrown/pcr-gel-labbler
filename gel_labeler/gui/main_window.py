@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                              QTabWidget, QDialog, QListWidget, QListWidgetItem,
                              QPushButton, QCheckBox, QLineEdit, QComboBox,
                              QStackedWidget)
-from PyQt6.QtCore import Qt, QTimer, QSize, QStandardPaths, pyqtSignal
-from PyQt6.QtGui import QAction, QImage, QPainter, QIcon, QFont
+from PyQt6.QtCore import Qt, QTimer, QSize, QStandardPaths, pyqtSignal, QUrl
+from PyQt6.QtGui import QAction, QImage, QPainter, QIcon, QFont, QDesktopServices
 
 logger = logging.getLogger("gel_labeler")
 
@@ -455,6 +455,7 @@ class MainWindow(QMainWindow):
         
         # Check and recover session after window is initialized
         QTimer.singleShot(100, self.check_and_recover_session)
+        QTimer.singleShot(3500, self.quiet_check_for_updates)
         
         # Create core UI parts
         self.init_ui()
@@ -706,6 +707,17 @@ class MainWindow(QMainWindow):
         
         # --- Help Menu ---
         help_menu = menubar.addMenu("Help")
+        
+        check_update_action = QAction("🔄 Check for Updates...", self)
+        check_update_action.triggered.connect(self.show_check_updates_dialog)
+        help_menu.addAction(check_update_action)
+        
+        github_action = QAction("🌐 GitHub Repository & Releases", self)
+        github_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/vropalcrown/pcr-gel-labbler")))
+        help_menu.addAction(github_action)
+        
+        help_menu.addSeparator()
+        
         about_action = QAction("About Gel Labeler", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
@@ -1733,11 +1745,30 @@ class MainWindow(QMainWindow):
                     }}
                 """)
 
+    def show_check_updates_dialog(self):
+        """Displays interactive check for updates dialog."""
+        from gel_labeler.gui.update_dialog import UpdateDialog
+        dlg = UpdateDialog(self, auto_start_check=True)
+        dlg.exec()
+
+    def quiet_check_for_updates(self):
+        """Runs quiet background check on startup; notifies via status bar only if a newer version exists."""
+        from gel_labeler.core.updater import UpdateCheckWorker, CURRENT_VERSION
+        self._bg_update_worker = UpdateCheckWorker(local_version=CURRENT_VERSION, parent=self)
+        
+        def on_bg_check(is_newer, latest_ver, rel_url, notes, dl_url):
+            if is_newer:
+                self.show_status_message(f"🎉 Update available: Gel Labeler {latest_ver} is out! Go to Help -> Check for Updates to download.", timeout=15000)
+                
+        self._bg_update_worker.check_completed.connect(on_bg_check)
+        self._bg_update_worker.start()
+
     def show_about_dialog(self):
         """Displays application details."""
+        from gel_labeler.core.updater import CURRENT_VERSION
         QMessageBox.about(
             self, "About Gel Labeler Suite",
-            "<h3>Gel Labeler — Molecular Biology Lab Suite</h3>"
+            f"<h3>🧬 Gel Labeler — Molecular Biology Suite (v{CURRENT_VERSION})</h3>"
             "<p>A professional, all-in-one desktop suite for molecular biologists, geneticists, and laboratory researchers.</p>"
             "<p><b>Included Applications:</b></p>"
             "<ul>"
@@ -1745,7 +1776,9 @@ class MainWindow(QMainWindow):
             "  <li><b>🧪 Master Mixer:</b> PCR, qPCR, restriction digest, and cDNA reaction calculator with pipetting excess scaling.</li>"
             "  <li><b>📋 Lab Protocols:</b> Interactive digital SOP checklists with built-in countdown bench timers.</li>"
             "  <li><b>🧫 AI Colony Counter:</b> Computer vision colony and seed counting with CFU/mL estimation.</li>"
+            "  <li><b>▦ Multiwell Plates:</b> 6-, 12-, 24-, 48-, 96-, 384-well plate layout designer, auto-numbering & matrix CSV.</li>"
             "</ul>"
+            "<p><b>GitHub:</b> <a href='https://github.com/vropalcrown/pcr-gel-labbler'>github.com/vropalcrown/pcr-gel-labbler</a></p>"
             "<p>Author: Devanandan K C</p>"
         )
 

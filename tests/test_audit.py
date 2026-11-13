@@ -382,6 +382,26 @@ class TestAuditRemediation(unittest.TestCase):
             if os.path.exists(tmp_plate):
                 os.remove(tmp_plate)
 
+    def test_updater_version_comparison(self):
+        """Test semantic version parsing and newer release detection."""
+        from gel_labeler.core.updater import parse_version_string, is_version_newer
+
+        self.assertEqual(parse_version_string("v1.0.0"), (1, 0, 0))
+        self.assertEqual(parse_version_string("1.2.3"), (1, 2, 3))
+        self.assertEqual(parse_version_string("v2.0-beta"), (2, 0))
+        self.assertEqual(parse_version_string(""), (0, 0, 0))
+
+        # Newer version tests
+        self.assertTrue(is_version_newer("v1.0.1", "1.0.0"))
+        self.assertTrue(is_version_newer("1.1.0", "1.0.9"))
+        self.assertTrue(is_version_newer("v2.0.0", "1.9.9"))
+
+        # Same or older tests
+        self.assertFalse(is_version_newer("1.0.0", "1.0.0"))
+        self.assertFalse(is_version_newer("v1.0.0", "1.0.0"))
+        self.assertFalse(is_version_newer("v0.9.9", "1.0.0"))
+        self.assertFalse(is_version_newer("1.0.0", "1.0.1"))
+
 
 if __name__ == "__main__":
     unittest.main()
