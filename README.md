@@ -1,4 +1,4 @@
-# 🧬 Molecular Biology Suite — Gel Labeler, Master Mixer, Protocols & Plate Designer
+# 🧬 Molecular Biology Suite — Gel Labeler, Master Mixer, Protocols & Plate Designer (BETA)
 
 A high-performance, publication-ready bioinformatics desktop suite designed for molecular biology and biochemistry laboratories.
 
